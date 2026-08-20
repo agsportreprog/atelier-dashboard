@@ -99,6 +99,33 @@
   .card .presta{font-size:13px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.04em;}
   .card .phone{font-size:13px; color:var(--text-dim); font-family:var(--mono);}
   .card .raw{font-size:13px; color:var(--text-dim);}
+  .comment-text{
+    font-size:13px; color:var(--text-dim); font-style:italic; margin-top:2px;
+    padding:6px 10px; background:var(--panel-2); border-radius:8px; border-left:2px solid var(--accent);
+  }
+  .comment-btn{
+    font-size:12px; color:var(--accent); margin-top:4px; cursor:pointer; width:fit-content;
+  }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center;
+    z-index:100; padding:20px;
+  }
+  .modal{
+    background:var(--panel); border:1px solid var(--line-solid); border-radius:16px;
+    padding:24px; width:100%; max-width:440px;
+  }
+  .modal h3{margin:0 0 14px; font-size:16px;}
+  .modal textarea{
+    width:100%; min-height:110px; padding:12px 14px; border-radius:10px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px; resize:vertical;
+  }
+  .modal .modal-actions{display:flex; gap:10px; margin-top:16px;}
+  .modal .modal-actions button{
+    flex:1; padding:12px; border-radius:10px; border:none; font-weight:700; font-size:14px; cursor:pointer;
+  }
+  .modal .btn-save{background:var(--accent); color:#1a0d05;}
+  .modal .btn-cancel{background:var(--panel-2); color:var(--text); border:1px solid var(--line-solid) !important;}
   .checkbox{
     width:34px; height:34px; border-radius:10px; border:2px solid var(--line-solid);
     display:flex; align-items:center; justify-content:center; transition: all .15s;
@@ -141,8 +168,10 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-const DONE_COLOR_ID = '10';  // vert (Basil) = fait
-const PAUSE_COLOR_ID = '5';  // jaune (Banana) = en pause
+// Le statut et le commentaire sont stockés en propriété privée invisible de l'événement
+// (n'affecte jamais la couleur ni l'apparence de l'événement dans Google Agenda)
+const STATUS_KEY = 'atelier_status';   // 'done' | 'paused' | absent
+const COMMENT_KEY = 'atelier_comment';
 
 let config = null;       // { clientId, calendarId }
 let tokenClient = null;
@@ -241,27 +270,38 @@ async function fetchEvents(){
     // pour un événement "jour entier", la date de fin Google est exclusive : on retire 1 jour
     let endD = new Date(endRaw);
     if(allDay) endD = new Date(endD.getTime() - 24*3600*1000);
+    const priv = ev.extendedProperties?.private || {};
     return {
       id: ev.id,
       start: startRaw,
       end: endRaw,
       startD, endD, allDay,
       raw: ev.summary || '',
-      done: ev.colorId === DONE_COLOR_ID,
-      paused: ev.colorId === PAUSE_COLOR_ID
+      done: priv[STATUS_KEY] === 'done',
+      paused: priv[STATUS_KEY] === 'paused',
+      comment: priv[COMMENT_KEY] || ''
     };
   });
   renderList();
 }
 
-async function setStatus(id, colorId){
+async function patchPrivateProps(id, props){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
   await fetch(url, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ colorId: colorId })
+    body: JSON.stringify({ extendedProperties: { private: props } })
   });
   fetchEvents();
+}
+
+function setStatus(id, status){
+  // status: 'done' | 'paused' | '' (vide = à faire)
+  patchPrivateProps(id, { [STATUS_KEY]: status });
+}
+
+function setComment(id, comment){
+  patchPrivateProps(id, { [COMMENT_KEY]: comment });
 }
 
 function parseParts(raw){
@@ -331,10 +371,19 @@ function renderList(){
           : `<div class="raw">${escapeHtml(ev.raw)}</div>
              ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`;
         const statusLabel = ev.done ? 'FAIT' : (ev.paused ? 'EN PAUSE' : 'PRÉVU');
+        const commentHtml = ev.comment
+          ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>`
+          : '';
         return `
           <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''}">
             <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
-            <div class="body">${body}</div>
+            <div class="body">
+              ${body}
+              ${commentHtml}
+              <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
+                ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
+              </div>
+            </div>
             <div class="check">
               <div class="pause-btn ${ev.paused ? 'on' : ''}" data-id="${ev.id}" data-paused="${ev.paused}">
                 <svg class="icon" viewBox="0 0 24 24" fill="#ffc946" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
@@ -385,11 +434,37 @@ function renderList(){
 
   document.getElementById('refreshBtn').onclick = fetchEvents;
   document.querySelectorAll('.done-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.done !== 'true' ? DONE_COLOR_ID : null);
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.done !== 'true' ? 'done' : '');
   });
   document.querySelectorAll('.pause-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.paused !== 'true' ? PAUSE_COLOR_ID : null);
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.paused !== 'true' ? 'paused' : '');
   });
+  document.querySelectorAll('.comment-btn').forEach(el => {
+    el.onclick = () => openCommentModal(el.dataset.id, decodeURIComponent(el.dataset.comment));
+  });
+}
+
+function openCommentModal(id, currentComment){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Commentaire sur ce rendez-vous</h3>
+      <textarea id="commentInput" placeholder="Ex : plaquettes changées, prévoir contrôle dans 15 jours...">${escapeHtml(currentComment || '')}</textarea>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelComment">Annuler</button>
+        <button class="btn-save" id="saveComment">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('cancelComment').onclick = () => overlay.remove();
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('saveComment').onclick = () => {
+    const val = document.getElementById('commentInput').value.trim();
+    overlay.remove();
+    setComment(id, val);
+  };
 }
 
 function escapeHtml(s){
