@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Atelier — Planning du jour</title>
+<style>
+  :root{
+    --bg: #14161a;
+    --panel: #1d2027;
+    --panel-2: #262a33;
+    --line: #33384433;
+    --line-solid: #383d47;
+    --accent: #ff6a2b;
+    --accent-dim: #ff6a2b22;
+    --done: #3ecf8e;
+    --done-dim: #3ecf8e22;
+    --text: #f2f0ea;
+    --text-dim: #9aa0ab;
+    --mono: 'SF Mono', 'Consolas', monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0; padding:0; height:100%; background:var(--bg); color:var(--text);
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; overflow-x:hidden;}
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 28px; border-bottom:1px solid var(--line-solid);
+    background: linear-gradient(180deg, #191c22, #14161a);
+  }
+  .brand{display:flex; align-items:center; gap:14px;}
+  .brand .dot{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 14px var(--accent);}
+  .brand h1{font-size:15px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; margin:0; color:var(--text-dim);}
+  .brand .date{font-size:20px; font-weight:700; margin-top:2px; text-transform:capitalize;}
+  .status{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:12px; color:var(--text-dim);}
+  .status .led{width:8px; height:8px; border-radius:50%; background:#555;}
+  .status .led.live{background:var(--done); box-shadow:0 0 8px var(--done);}
+  .status button{
+    background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text);
+    padding:8px 14px; border-radius:8px; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  .status button:active{transform:scale(.96);}
+
+  .counts{display:flex; gap:10px; padding:16px 28px 0;}
+  .pill{
+    font-family:var(--mono); font-size:12px; padding:6px 12px; border-radius:20px;
+    border:1px solid var(--line-solid); color:var(--text-dim);
+  }
+  .pill b{color:var(--text); font-size:14px;}
+
+  .list{padding:16px 28px 40px; display:flex; flex-direction:column; gap:10px;}
+
+  .card{
+    display:flex; align-items:stretch; gap:0;
+    background:var(--panel); border:1px solid var(--line-solid); border-radius:14px;
+    overflow:hidden; transition: opacity .25s, transform .15s;
+  }
+  .card.done{opacity:.45;}
+  .card .time{
+    width:92px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:var(--panel-2); font-family:var(--mono); font-weight:700; font-size:18px; border-right:1px solid var(--line-solid);
+  }
+  .card .time span{font-size:10px; font-weight:400; color:var(--text-dim); margin-top:2px;}
+  .card .body{flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:4px; min-width:0;}
+  .card .model{font-size:17px; font-weight:700;}
+  .card .presta{font-size:13px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.04em;}
+  .card .phone{font-size:13px; color:var(--text-dim); font-family:var(--mono);}
+  .card .raw{font-size:13px; color:var(--text-dim);}
+  .card .check{
+    width:74px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+    background:var(--panel-2); border-left:1px solid var(--line-solid); cursor:pointer;
+  }
+  .checkbox{
+    width:34px; height:34px; border-radius:10px; border:2px solid var(--line-solid);
+    display:flex; align-items:center; justify-content:center; transition: all .15s;
+  }
+  .checkbox.on{background:var(--done); border-color:var(--done);}
+  .checkbox svg{width:18px; height:18px; opacity:0;}
+  .checkbox.on svg{opacity:1;}
+  .card.done .time{background:var(--done-dim);}
+
+  .empty{padding:60px 20px; text-align:center; color:var(--text-dim);}
+  .empty .big{font-size:15px; margin-bottom:6px; color:var(--text);}
+
+  .setup{max-width:480px; margin:60px auto; padding:0 20px;}
+  .setup h2{font-size:18px; margin-bottom:4px;}
+  .setup p{color:var(--text-dim); font-size:13px; line-height:1.5;}
+  .setup label{display:block; font-size:12px; color:var(--text-dim); margin:16px 0 6px;}
+  .setup input{
+    width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line-solid);
+    background:var(--panel); color:var(--text); font-family:var(--mono); font-size:13px;
+  }
+  .setup .primary{
+    margin-top:22px; width:100%; padding:14px; border-radius:10px; border:none;
+    background:var(--accent); color:#1a0d05; font-weight:700; font-size:14px; cursor:pointer;
+  }
+  .setup .origin{
+    margin-top:18px; padding:12px 14px; background:var(--panel-2); border-radius:10px;
+    font-family:var(--mono); font-size:12px; color:var(--text-dim); word-break:break-all;
+  }
+  .center-login{display:flex; flex-direction:column; align-items:center; justify-content:center; padding:80px 20px; gap:16px;}
+  .center-login button{
+    background:var(--accent); color:#1a0d05; border:none; padding:16px 28px; border-radius:12px;
+    font-weight:700; font-size:15px; cursor:pointer;
+  }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const DONE_COLOR_ID = '10'; // vert (Basil) = fait
+
+let config = null;       // { clientId, calendarId }
+let tokenClient = null;
+let accessToken = null;
+let events = [];
+let pollTimer = null;
+
+const app = document.getElementById('app');
+
+async function loadConfig(){
+  try{
+    const r = await window.storage.get('config', true);
+    config = r ? JSON.parse(r.value) : null;
+  }catch(e){ config = null; }
+}
+
+async function saveConfig(c){
+  await window.storage.set('config', JSON.stringify(c), true);
+  config = c;
+}
+
+function renderSetup(){
+  app.innerHTML = `
+    <div class="setup">
+      <h2>Configuration</h2>
+      <p>À faire une seule fois. Une fois enregistrée, la configuration est partagée entre le PC et la tablette.</p>
+      <label>ID client OAuth (Google Cloud Console)</label>
+      <input id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" value="${config?.clientId || ''}">
+      <label>ID de l'agenda Google</label>
+      <input id="calendarId" placeholder="toncompte@gmail.com" value="${config?.calendarId || ''}">
+      <button class="primary" id="saveBtn">Enregistrer et continuer</button>
+      <div class="origin">Origine JavaScript à autoriser dans Google Cloud Console pour cet identifiant :<br><b id="originText"></b></div>
+    </div>
+  `;
+  document.getElementById('originText').textContent = window.location.origin;
+  document.getElementById('saveBtn').onclick = async () => {
+    const clientId = document.getElementById('clientId').value.trim();
+    const calendarId = document.getElementById('calendarId').value.trim();
+    if(!clientId || !calendarId) return;
+    await saveConfig({clientId, calendarId});
+    init();
+  };
+}
+
+function renderLogin(){
+  app.innerHTML = `
+    <div class="center-login">
+      <div style="font-size:14px;color:var(--text-dim)">Connecte ce écran à Google Agenda</div>
+      <button id="loginBtn">Se connecter avec Google</button>
+      <div style="font-size:12px;color:var(--text-dim);cursor:pointer;text-decoration:underline" id="reconfig">Modifier la configuration</div>
+    </div>
+  `;
+  document.getElementById('loginBtn').onclick = () => requestToken(true);
+  document.getElementById('reconfig').onclick = () => { config = null; renderSetup(); };
+}
+
+function requestToken(interactive){
+  if(!tokenClient){
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: config.clientId,
+      scope: SCOPE,
+      callback: (resp) => {
+        if(resp.error){ renderLogin(); return; }
+        accessToken = resp.access_token;
+        startApp();
+      }
+    });
+  }
+  tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
+}
+
+function todayRange(){
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23,59,59);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
+}
+
+async function fetchEvents(){
+  const { timeMin, timeMax } = todayRange();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
+  if(res.status === 401){ accessToken = null; renderLogin(); return; }
+  const data = await res.json();
+  events = (data.items || []).map(ev => ({
+    id: ev.id,
+    start: ev.start?.dateTime || ev.start?.date,
+    title: ev.title || ev.summary || '',
+    raw: ev.summary || '',
+    done: ev.colorId === DONE_COLOR_ID
+  }));
+  renderList();
+}
+
+async function toggleDone(id, done){
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
+  await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ colorId: done ? DONE_COLOR_ID : null })
+  });
+  fetchEvents();
+}
+
+function parseParts(raw){
+  const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+  if(parts.length >= 2){
+    return { model: parts[0], presta: parts[1] || '', phone: parts[2] || '' };
+  }
+  return null;
+}
+
+function fmtTime(dtStr){
+  if(!dtStr) return '--:--';
+  if(dtStr.length === 10) return 'Jour';
+  const d = new Date(dtStr);
+  return d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+}
+
+function renderList(){
+  const doneCount = events.filter(e => e.done).length;
+  const dateLabel = new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+  let listHtml = '';
+  if(events.length === 0){
+    listHtml = `<div class="empty"><div class="big">Aucun rendez-vous aujourd'hui</div>Le planning est vide pour la journée.</div>`;
+  } else {
+    listHtml = events.map(ev => {
+      const parts = parseParts(ev.raw);
+      const body = parts
+        ? `<div class="model">${escapeHtml(parts.model)}</div>
+           <div class="presta">${escapeHtml(parts.presta)}</div>
+           ${parts.phone ? `<div class="phone">${escapeHtml(parts.phone)}</div>` : ''}`
+        : `<div class="raw">${escapeHtml(ev.raw)}</div>`;
+      return `
+        <div class="card ${ev.done ? 'done' : ''}">
+          <div class="time">${fmtTime(ev.start)}<span>${ev.done ? 'FAIT' : 'PRÉVU'}</span></div>
+          <div class="body">${body}</div>
+          <div class="check" data-id="${ev.id}" data-done="${ev.done}">
+            <div class="checkbox ${ev.done ? 'on' : ''}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#0d1f16" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  app.innerHTML = `
+    <div class="topbar">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>
+          <h1>Atelier · Planning</h1>
+          <div class="date">${dateLabel}</div>
+        </div>
+      </div>
+      <div class="status">
+        <div class="led live"></div>
+        Synchronisé
+        <button id="refreshBtn">↻ Actualiser</button>
+      </div>
+    </div>
+    <div class="counts">
+      <div class="pill"><b>${events.length}</b> rendez-vous</div>
+      <div class="pill"><b>${doneCount}</b> terminés</div>
+      <div class="pill"><b>${events.length - doneCount}</b> restants</div>
+    </div>
+    <div class="list">${listHtml}</div>
+  `;
+
+  document.getElementById('refreshBtn').onclick = fetchEvents;
+  document.querySelectorAll('.check').forEach(el => {
+    el.onclick = () => toggleDone(el.dataset.id, el.dataset.done !== 'true');
+  });
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function startApp(){
+  fetchEvents();
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchEvents, 30000); // resynchro toutes les 30s
+}
+
+async function init(){
+  await loadConfig();
+  if(!config){ renderSetup(); return; }
+  renderLogin();
+  // tente une reconnexion silencieuse si un token Google est déjà en session navigateur
+  const checkGsi = setInterval(() => {
+    if(window.google && google.accounts){
+      clearInterval(checkGsi);
+      requestToken(false);
+    }
+  }, 200);
+}
+
+init();
+</script>
+</body>
+</html>
