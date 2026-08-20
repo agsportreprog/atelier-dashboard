@@ -50,6 +50,24 @@
 
   .list{padding:16px 28px 40px; display:flex; flex-direction:column; gap:10px;}
 
+  .day-header{
+    display:flex; align-items:baseline; gap:10px; margin:22px 0 4px; padding-bottom:8px;
+    border-bottom:1px solid var(--line-solid);
+  }
+  .day-header:first-child{margin-top:0;}
+  .day-header .label{font-size:16px; font-weight:700; text-transform:capitalize;}
+  .day-header .today-tag{
+    font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.05em;
+    background:var(--accent); color:#1a0d05; padding:3px 8px; border-radius:6px; text-transform:uppercase;
+  }
+  .day-header .count{font-size:12px; color:var(--text-dim); margin-left:auto; font-family:var(--mono);}
+
+  .multiday-tag{
+    display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text-dim);
+    padding:2px 7px; border-radius:6px; margin-top:2px;
+  }
+
   .card{
     display:flex; align-items:stretch; gap:0;
     background:var(--panel); border:1px solid var(--line-solid); border-radius:14px;
@@ -184,26 +202,42 @@ function requestToken(interactive){
   tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
 }
 
-function todayRange(){
+const DAYS_AHEAD = 3; // aujourd'hui + 2 jours
+
+function windowRange(){
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23,59,59);
-  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + DAYS_AHEAD - 1, 23,59,59);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString(), start, end };
+}
+
+function dayKey(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 async function fetchEvents(){
-  const { timeMin, timeMax } = todayRange();
+  const { timeMin, timeMax } = windowRange();
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
   if(res.status === 401){ accessToken = null; renderLogin(); return; }
   const data = await res.json();
-  events = (data.items || []).map(ev => ({
-    id: ev.id,
-    start: ev.start?.dateTime || ev.start?.date,
-    title: ev.title || ev.summary || '',
-    raw: ev.summary || '',
-    done: ev.colorId === DONE_COLOR_ID
-  }));
+  events = (data.items || []).map(ev => {
+    const startRaw = ev.start?.dateTime || ev.start?.date;
+    const endRaw = ev.end?.dateTime || ev.end?.date;
+    const allDay = !ev.start?.dateTime;
+    const startD = new Date(startRaw);
+    // pour un événement "jour entier", la date de fin Google est exclusive : on retire 1 jour
+    let endD = new Date(endRaw);
+    if(allDay) endD = new Date(endD.getTime() - 24*3600*1000);
+    return {
+      id: ev.id,
+      start: startRaw,
+      end: endRaw,
+      startD, endD, allDay,
+      raw: ev.summary || '',
+      done: ev.colorId === DONE_COLOR_ID
+    };
+  });
   renderList();
 }
 
@@ -234,31 +268,63 @@ function fmtTime(dtStr){
 
 function renderList(){
   const doneCount = events.filter(e => e.done).length;
-  const dateLabel = new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+  const today = new Date();
+  const todayKey = dayKey(today);
+  const headerDate = today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+  // construit les DAYS_AHEAD jours de la fenêtre
+  const days = [];
+  for(let i = 0; i < DAYS_AHEAD; i++){
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    days.push(d);
+  }
 
   let listHtml = '';
-  if(events.length === 0){
-    listHtml = `<div class="empty"><div class="big">Aucun rendez-vous aujourd'hui</div>Le planning est vide pour la journée.</div>`;
-  } else {
-    listHtml = events.map(ev => {
-      const parts = parseParts(ev.raw);
-      const body = parts
-        ? `<div class="model">${escapeHtml(parts.model)}</div>
-           <div class="presta">${escapeHtml(parts.presta)}</div>
-           ${parts.phone ? `<div class="phone">${escapeHtml(parts.phone)}</div>` : ''}`
-        : `<div class="raw">${escapeHtml(ev.raw)}</div>`;
-      return `
-        <div class="card ${ev.done ? 'done' : ''}">
-          <div class="time">${fmtTime(ev.start)}<span>${ev.done ? 'FAIT' : 'PRÉVU'}</span></div>
-          <div class="body">${body}</div>
-          <div class="check" data-id="${ev.id}" data-done="${ev.done}">
-            <div class="checkbox ${ev.done ? 'on' : ''}">
-              <svg viewBox="0 0 24 24" fill="none" stroke="#0d1f16" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+  days.forEach(d => {
+    const key = dayKey(d);
+    const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59);
+    // un événement apparaît ce jour-là s'il couvre ce jour (gère les véhicules gardés plusieurs jours)
+    const dayEvents = events.filter(ev => ev.startD <= dEnd && ev.endD >= d);
+
+    const isToday = key === todayKey;
+    const label = isToday ? "Aujourd'hui" : d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+    let cardsHtml;
+    if(dayEvents.length === 0){
+      cardsHtml = `<div class="empty" style="padding:24px 20px"><div class="big">Rien de prévu</div></div>`;
+    } else {
+      cardsHtml = dayEvents.map(ev => {
+        const parts = parseParts(ev.raw);
+        const spansMultiple = dayKey(ev.startD) !== dayKey(ev.endD);
+        const body = parts
+          ? `<div class="model">${escapeHtml(parts.model)}</div>
+             <div class="presta">${escapeHtml(parts.presta)}</div>
+             ${parts.phone ? `<div class="phone">${escapeHtml(parts.phone)}</div>` : ''}
+             ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`
+          : `<div class="raw">${escapeHtml(ev.raw)}</div>
+             ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`;
+        return `
+          <div class="card ${ev.done ? 'done' : ''}">
+            <div class="time">${fmtTime(ev.allDay ? null : ev.start)}<span>${ev.done ? 'FAIT' : 'PRÉVU'}</span></div>
+            <div class="body">${body}</div>
+            <div class="check" data-id="${ev.id}" data-done="${ev.done}">
+              <div class="checkbox ${ev.done ? 'on' : ''}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#0d1f16" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+              </div>
             </div>
-          </div>
-        </div>`;
-    }).join('');
-  }
+          </div>`;
+      }).join('');
+    }
+
+    listHtml += `
+      <div class="day-header">
+        <div class="label">${label}</div>
+        ${isToday ? '<div class="today-tag">Aujourd\'hui</div>' : ''}
+        <div class="count">${dayEvents.length} véhicule${dayEvents.length > 1 ? 's' : ''}</div>
+      </div>
+      ${cardsHtml}
+    `;
+  });
 
   app.innerHTML = `
     <div class="topbar">
@@ -266,7 +332,7 @@ function renderList(){
         <div class="dot"></div>
         <div>
           <h1>Atelier · Planning</h1>
-          <div class="date">${dateLabel}</div>
+          <div class="date">${headerDate}</div>
         </div>
       </div>
       <div class="status">
@@ -276,7 +342,7 @@ function renderList(){
       </div>
     </div>
     <div class="counts">
-      <div class="pill"><b>${events.length}</b> rendez-vous</div>
+      <div class="pill"><b>${events.length}</b> véhicules (3 jours)</div>
       <div class="pill"><b>${doneCount}</b> terminés</div>
       <div class="pill"><b>${events.length - doneCount}</b> restants</div>
     </div>
