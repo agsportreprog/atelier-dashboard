@@ -124,13 +124,13 @@ const app = document.getElementById('app');
 
 async function loadConfig(){
   try{
-    const r = await window.storage.get('config', true);
-    config = r ? JSON.parse(r.value) : null;
+    const raw = localStorage.getItem('atelier_config');
+    config = raw ? JSON.parse(raw) : null;
   }catch(e){ config = null; }
 }
 
 async function saveConfig(c){
-  await window.storage.set('config', JSON.stringify(c), true);
+  localStorage.setItem('atelier_config', JSON.stringify(c));
   config = c;
 }
 
@@ -138,7 +138,7 @@ function renderSetup(){
   app.innerHTML = `
     <div class="setup">
       <h2>Configuration</h2>
-      <p>À faire une seule fois. Une fois enregistrée, la configuration est partagée entre le PC et la tablette.</p>
+      <p>À faire une fois sur cet appareil. Refais cette étape sur l'autre écran (PC ou tablette) avec les mêmes infos.</p>
       <label>ID client OAuth (Google Cloud Console)</label>
       <input id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" value="${config?.clientId || ''}">
       <label>ID de l'agenda Google</label>
