@@ -74,6 +74,19 @@
     overflow:hidden; transition: opacity .25s, transform .15s;
   }
   .card.done{opacity:.45;}
+  .card.paused{opacity:.55;}
+  .card.paused .time{background:#ffc94622;}
+  .card .check{
+    width:74px; flex-shrink:0; display:flex; flex-direction:column; align-items:stretch; justify-content:stretch;
+  }
+  .card .pause-btn, .card .done-btn{
+    flex:1; display:flex; align-items:center; justify-content:center;
+    background:var(--panel-2); border-left:1px solid var(--line-solid); cursor:pointer;
+  }
+  .card .pause-btn{border-bottom:1px solid var(--line-solid);}
+  .pause-btn .icon{width:18px; height:18px; opacity:.4; transition: opacity .15s;}
+  .pause-btn.on .icon{opacity:1;}
+  .pause-btn.on{background:#ffc94622;}
   .card .time{
     width:118px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
     background:var(--panel-2); font-family:var(--mono); font-weight:700; font-size:14px; border-right:1px solid var(--line-solid);
@@ -86,10 +99,6 @@
   .card .presta{font-size:13px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.04em;}
   .card .phone{font-size:13px; color:var(--text-dim); font-family:var(--mono);}
   .card .raw{font-size:13px; color:var(--text-dim);}
-  .card .check{
-    width:74px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
-    background:var(--panel-2); border-left:1px solid var(--line-solid); cursor:pointer;
-  }
   .checkbox{
     width:34px; height:34px; border-radius:10px; border:2px solid var(--line-solid);
     display:flex; align-items:center; justify-content:center; transition: all .15s;
@@ -132,7 +141,8 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-const DONE_COLOR_ID = '10'; // vert (Basil) = fait
+const DONE_COLOR_ID = '10';  // vert (Basil) = fait
+const PAUSE_COLOR_ID = '5';  // jaune (Banana) = en pause
 
 let config = null;       // { clientId, calendarId }
 let tokenClient = null;
@@ -237,18 +247,19 @@ async function fetchEvents(){
       end: endRaw,
       startD, endD, allDay,
       raw: ev.summary || '',
-      done: ev.colorId === DONE_COLOR_ID
+      done: ev.colorId === DONE_COLOR_ID,
+      paused: ev.colorId === PAUSE_COLOR_ID
     };
   });
   renderList();
 }
 
-async function toggleDone(id, done){
+async function setStatus(id, colorId){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
   await fetch(url, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ colorId: done ? DONE_COLOR_ID : null })
+    body: JSON.stringify({ colorId: colorId })
   });
   fetchEvents();
 }
@@ -276,7 +287,9 @@ function fmtRange(ev){
 }
 
 function renderList(){
-  const doneCount = events.filter(e => e.done).length;
+  const activeEvents = events.filter(e => !e.paused);
+  const doneCount = activeEvents.filter(e => e.done).length;
+  const pausedCount = events.filter(e => e.paused).length;
   const today = new Date();
   const todayKey = dayKey(today);
   const headerDate = today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
@@ -293,10 +306,15 @@ function renderList(){
     const key = dayKey(d);
     const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59);
     // un événement apparaît ce jour-là s'il couvre ce jour (gère les véhicules gardés plusieurs jours)
-    const dayEvents = events.filter(ev => ev.startD <= dEnd && ev.endD >= d);
+    const dayEvents = events
+      .filter(ev => ev.startD <= dEnd && ev.endD >= d)
+      .sort((a, b) => a.startD - b.startD);
 
     const isToday = key === todayKey;
     const label = isToday ? "Aujourd'hui" : d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+    // les véhicules "en pause" ne comptent pas dans les compteurs
+    const countedEvents = dayEvents.filter(ev => !ev.paused);
 
     let cardsHtml;
     if(dayEvents.length === 0){
@@ -312,13 +330,19 @@ function renderList(){
              ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`
           : `<div class="raw">${escapeHtml(ev.raw)}</div>
              ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`;
+        const statusLabel = ev.done ? 'FAIT' : (ev.paused ? 'EN PAUSE' : 'PRÉVU');
         return `
-          <div class="card ${ev.done ? 'done' : ''}">
-            <div class="time">${fmtRange(ev)}<span>${ev.done ? 'FAIT' : 'PRÉVU'}</span></div>
+          <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''}">
+            <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
             <div class="body">${body}</div>
-            <div class="check" data-id="${ev.id}" data-done="${ev.done}">
-              <div class="checkbox ${ev.done ? 'on' : ''}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#0d1f16" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+            <div class="check">
+              <div class="pause-btn ${ev.paused ? 'on' : ''}" data-id="${ev.id}" data-paused="${ev.paused}">
+                <svg class="icon" viewBox="0 0 24 24" fill="#ffc946" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+              </div>
+              <div class="done-btn" data-id="${ev.id}" data-done="${ev.done}">
+                <div class="checkbox ${ev.done ? 'on' : ''}">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#0d1f16" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+                </div>
               </div>
             </div>
           </div>`;
@@ -329,7 +353,7 @@ function renderList(){
       <div class="day-header">
         <div class="label">${label}</div>
         ${isToday ? '<div class="today-tag">Aujourd\'hui</div>' : ''}
-        <div class="count">${dayEvents.length} véhicule${dayEvents.length > 1 ? 's' : ''}</div>
+        <div class="count">${countedEvents.length} véhicule${countedEvents.length > 1 ? 's' : ''}</div>
       </div>
       ${cardsHtml}
     `;
@@ -351,16 +375,20 @@ function renderList(){
       </div>
     </div>
     <div class="counts">
-      <div class="pill"><b>${events.length}</b> véhicules (3 jours)</div>
+      <div class="pill"><b>${activeEvents.length}</b> véhicules (3 jours)</div>
       <div class="pill"><b>${doneCount}</b> terminés</div>
-      <div class="pill"><b>${events.length - doneCount}</b> restants</div>
+      <div class="pill"><b>${activeEvents.length - doneCount}</b> restants</div>
+      ${pausedCount > 0 ? `<div class="pill"><b>${pausedCount}</b> en pause</div>` : ''}
     </div>
     <div class="list">${listHtml}</div>
   `;
 
   document.getElementById('refreshBtn').onclick = fetchEvents;
-  document.querySelectorAll('.check').forEach(el => {
-    el.onclick = () => toggleDone(el.dataset.id, el.dataset.done !== 'true');
+  document.querySelectorAll('.done-btn').forEach(el => {
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.done !== 'true' ? DONE_COLOR_ID : null);
+  });
+  document.querySelectorAll('.pause-btn').forEach(el => {
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.paused !== 'true' ? PAUSE_COLOR_ID : null);
   });
 }
 
