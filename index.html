@@ -253,11 +253,21 @@ function requestToken(interactive){
       callback: (resp) => {
         if(resp.error){ renderLogin(); return; }
         accessToken = resp.access_token;
+        scheduleTokenRefresh(resp.expires_in);
         startApp();
       }
     });
   }
   tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
+}
+
+let refreshTimer = null;
+
+function scheduleTokenRefresh(expiresInSeconds){
+  if(refreshTimer) clearTimeout(refreshTimer);
+  // se reconnecte en silence 5 minutes avant l'expiration (par défaut ~1h)
+  const delayMs = Math.max((expiresInSeconds - 300) * 1000, 30000);
+  refreshTimer = setTimeout(() => requestToken(false), delayMs);
 }
 
 const DAYS_AHEAD = 3; // aujourd'hui + 2 jours
@@ -298,7 +308,7 @@ async function fetchEvents(){
   const { timeMin, timeMax } = windowRange();
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if(res.status === 401){ accessToken = null; renderLogin(); return; }
+  if(res.status === 401){ requestToken(false); return; }
   const data = await res.json();
   events = (data.items || []).map(mapEvent);
   renderList();
@@ -526,7 +536,7 @@ async function runSearch(query){
     + `?singleEvents=true&orderBy=startTime&maxResults=50&q=${encodeURIComponent(query)}`
     + `&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if(res.status === 401){ accessToken = null; renderLogin(); return; }
+  if(res.status === 401){ requestToken(false); return; }
   const data = await res.json();
   const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD); // plus récent en premier
 
