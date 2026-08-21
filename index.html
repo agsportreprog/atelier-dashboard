@@ -126,6 +126,23 @@
   }
   .modal .btn-save{background:var(--accent); color:#1a0d05;}
   .modal .btn-cancel{background:var(--panel-2); color:var(--text); border:1px solid var(--line-solid) !important;}
+
+  .modal-search{max-width:560px;}
+  .modal-search #searchInput{
+    width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px; margin-bottom:14px;
+  }
+  .search-results{max-height:50vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;}
+  .search-hint{color:var(--text-dim); font-size:13px; padding:10px 2px;}
+  .search-result{
+    display:flex; gap:12px; align-items:flex-start; background:var(--panel-2);
+    border:1px solid var(--line-solid); border-radius:10px; padding:10px 12px;
+  }
+  .sr-date{font-family:var(--mono); font-size:11px; color:var(--text-dim); width:72px; flex-shrink:0; padding-top:2px;}
+  .sr-body{flex:1; min-width:0;}
+  .sr-title{font-size:14px; font-weight:700;}
+  .sr-phone{font-size:12px; color:var(--text-dim); font-family:var(--mono);}
+  .sr-status{font-size:11px; color:var(--text-dim); flex-shrink:0; text-transform:uppercase; padding-top:2px;}
   .checkbox{
     width:34px; height:34px; border-radius:10px; border:2px solid var(--line-solid);
     display:flex; align-items:center; justify-content:center; transition: all .15s;
@@ -256,32 +273,34 @@ function dayKey(d){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
+function mapEvent(ev){
+  const startRaw = ev.start?.dateTime || ev.start?.date;
+  const endRaw = ev.end?.dateTime || ev.end?.date;
+  const allDay = !ev.start?.dateTime;
+  const startD = new Date(startRaw);
+  // pour un événement "jour entier", la date de fin Google est exclusive : on retire 1 jour
+  let endD = new Date(endRaw);
+  if(allDay) endD = new Date(endD.getTime() - 24*3600*1000);
+  const priv = ev.extendedProperties?.private || {};
+  return {
+    id: ev.id,
+    start: startRaw,
+    end: endRaw,
+    startD, endD, allDay,
+    raw: ev.summary || '',
+    done: priv[STATUS_KEY] === 'done',
+    paused: priv[STATUS_KEY] === 'paused',
+    comment: priv[COMMENT_KEY] || ''
+  };
+}
+
 async function fetchEvents(){
   const { timeMin, timeMax } = windowRange();
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
   if(res.status === 401){ accessToken = null; renderLogin(); return; }
   const data = await res.json();
-  events = (data.items || []).map(ev => {
-    const startRaw = ev.start?.dateTime || ev.start?.date;
-    const endRaw = ev.end?.dateTime || ev.end?.date;
-    const allDay = !ev.start?.dateTime;
-    const startD = new Date(startRaw);
-    // pour un événement "jour entier", la date de fin Google est exclusive : on retire 1 jour
-    let endD = new Date(endRaw);
-    if(allDay) endD = new Date(endD.getTime() - 24*3600*1000);
-    const priv = ev.extendedProperties?.private || {};
-    return {
-      id: ev.id,
-      start: startRaw,
-      end: endRaw,
-      startD, endD, allDay,
-      raw: ev.summary || '',
-      done: priv[STATUS_KEY] === 'done',
-      paused: priv[STATUS_KEY] === 'paused',
-      comment: priv[COMMENT_KEY] || ''
-    };
-  });
+  events = (data.items || []).map(mapEvent);
   renderList();
 }
 
@@ -420,6 +439,7 @@ function renderList(){
       <div class="status">
         <div class="led live"></div>
         Synchronisé
+        <button id="searchBtn">🔍 Rechercher</button>
         <button id="refreshBtn">↻ Actualiser</button>
       </div>
     </div>
@@ -433,6 +453,7 @@ function renderList(){
   `;
 
   document.getElementById('refreshBtn').onclick = fetchEvents;
+  document.getElementById('searchBtn').onclick = openSearchModal;
   document.querySelectorAll('.done-btn').forEach(el => {
     el.onclick = () => setStatus(el.dataset.id, el.dataset.done !== 'true' ? 'done' : '');
   });
@@ -465,6 +486,72 @@ function openCommentModal(id, currentComment){
     overlay.remove();
     setComment(id, val);
   };
+}
+
+function openSearchModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal modal-search">
+      <h3>Rechercher un véhicule</h3>
+      <input type="text" id="searchInput" placeholder="Modèle, nom, téléphone...">
+      <div id="searchResults" class="search-results">
+        <div class="search-hint">Tape un mot-clé (modèle, téléphone...) et appuie sur Entrée.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="closeSearch">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('closeSearch').onclick = () => overlay.remove();
+  const input = document.getElementById('searchInput');
+  input.focus();
+  input.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') runSearch(input.value.trim());
+  });
+}
+
+async function runSearch(query){
+  const resultsEl = document.getElementById('searchResults');
+  if(!query){ return; }
+  resultsEl.innerHTML = `<div class="search-hint">Recherche en cours...</div>`;
+
+  // recherche sur une large plage : 2 ans en arrière jusqu'à 3 mois à l'avance
+  const now = new Date();
+  const timeMin = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()).toISOString();
+  const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`
+    + `?singleEvents=true&orderBy=startTime&maxResults=50&q=${encodeURIComponent(query)}`
+    + `&timeMin=${timeMin}&timeMax=${timeMax}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
+  if(res.status === 401){ accessToken = null; renderLogin(); return; }
+  const data = await res.json();
+  const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD); // plus récent en premier
+
+  if(results.length === 0){
+    resultsEl.innerHTML = `<div class="search-hint">Aucun résultat pour "${escapeHtml(query)}".</div>`;
+    return;
+  }
+
+  resultsEl.innerHTML = results.map(ev => {
+    const parts = parseParts(ev.raw);
+    const dateLabel = ev.startD.toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'});
+    const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : 'Prévu');
+    const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
+    return `
+      <div class="search-result">
+        <div class="sr-date">${dateLabel}</div>
+        <div class="sr-body">
+          <div class="sr-title">${escapeHtml(label)}</div>
+          ${parts?.phone ? `<div class="sr-phone">${escapeHtml(parts.phone)}</div>` : ''}
+          ${ev.comment ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>` : ''}
+        </div>
+        <div class="sr-status">${statusLabel}</div>
+      </div>
+    `;
+  }).join('');
 }
 
 function escapeHtml(s){
