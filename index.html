@@ -15,6 +15,8 @@
     --accent-dim: #ff6a2b22;
     --done: #3ecf8e;
     --done-dim: #3ecf8e22;
+    --cours: #4a9eff;
+    --cours-dim: #4a9eff22;
     --text: #f2f0ea;
     --text-dim: #9aa0ab;
     --mono: 'SF Mono', 'Consolas', monospace;
@@ -69,24 +71,30 @@
   }
 
   .card{
-    display:flex; align-items:stretch; gap:0;
+    display:flex; flex-direction:column;
     background:var(--panel); border:1px solid var(--line-solid); border-radius:14px;
     overflow:hidden; transition: opacity .25s, transform .15s;
   }
   .card.done{opacity:.45;}
   .card.paused{opacity:.55;}
   .card.paused .time{background:#ffc94622;}
-  .card .check{
-    width:74px; flex-shrink:0; display:flex; flex-direction:column; align-items:stretch; justify-content:stretch;
+  .card.inprogress .time{background:var(--cours-dim);}
+  .card-top{display:flex; align-items:stretch;}
+  .card-actions{display:flex; border-top:1px solid var(--line-solid);}
+  .action-btn{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 6px; background:var(--panel-2); border:none; border-right:1px solid var(--line-solid);
+    color:var(--text-dim); font-family:inherit; font-size:12px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.03em; cursor:pointer;
   }
-  .card .pause-btn, .card .done-btn{
-    flex:1; display:flex; align-items:center; justify-content:center;
-    background:var(--panel-2); border-left:1px solid var(--line-solid); cursor:pointer;
-  }
-  .card .pause-btn{border-bottom:1px solid var(--line-solid);}
-  .pause-btn .icon{width:18px; height:18px; opacity:.4; transition: opacity .15s;}
-  .pause-btn.on .icon{opacity:1;}
-  .pause-btn.on{background:#ffc94622;}
+  .action-btn:last-child{border-right:none;}
+  .action-btn svg{width:16px; height:16px; opacity:.6;}
+  .action-btn.cours-btn.on{background:var(--cours-dim); color:var(--cours);}
+  .action-btn.cours-btn.on svg{opacity:1;}
+  .action-btn.pause-btn.on{background:#ffc94622; color:#ffc946;}
+  .action-btn.pause-btn.on svg{opacity:1;}
+  .action-btn.done-btn.on{background:var(--done-dim); color:var(--done);}
+  .action-btn.done-btn.on svg{opacity:1;}
   .card .time{
     width:118px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
     background:var(--panel-2); font-family:var(--mono); font-weight:700; font-size:14px; border-right:1px solid var(--line-solid);
@@ -143,13 +151,6 @@
   .sr-title{font-size:14px; font-weight:700;}
   .sr-phone{font-size:12px; color:var(--text-dim); font-family:var(--mono);}
   .sr-status{font-size:11px; color:var(--text-dim); flex-shrink:0; text-transform:uppercase; padding-top:2px;}
-  .checkbox{
-    width:34px; height:34px; border-radius:10px; border:2px solid var(--line-solid);
-    display:flex; align-items:center; justify-content:center; transition: all .15s;
-  }
-  .checkbox.on{background:var(--done); border-color:var(--done);}
-  .checkbox svg{width:18px; height:18px; opacity:0;}
-  .checkbox.on svg{opacity:1;}
   .card.done .time{background:var(--done-dim);}
 
   .empty{padding:60px 20px; text-align:center; color:var(--text-dim);}
@@ -187,7 +188,7 @@
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 // Le statut et le commentaire sont stockés en propriété privée invisible de l'événement
 // (n'affecte jamais la couleur ni l'apparence de l'événement dans Google Agenda)
-const STATUS_KEY = 'atelier_status';   // 'done' | 'paused' | absent
+const STATUS_KEY = 'atelier_status';   // 'cours' | 'paused' | 'done' | absent
 const COMMENT_KEY = 'atelier_comment';
 
 let config = null;       // { clientId, calendarId }
@@ -262,6 +263,17 @@ function requestToken(interactive){
 }
 
 let refreshTimer = null;
+let lastSilentAttempt = 0;
+const SILENT_RETRY_COOLDOWN = 5 * 60 * 1000; // 5 minutes minimum entre deux tentatives silencieuses
+
+function requestSilentReauth(){
+  const now = Date.now();
+  if(now - lastSilentAttempt < SILENT_RETRY_COOLDOWN){
+    return; // on n'insiste pas, on retentera plus tard (évite le clignotement répété)
+  }
+  lastSilentAttempt = now;
+  requestToken(false);
+}
 
 function scheduleTokenRefresh(expiresInSeconds){
   if(refreshTimer) clearTimeout(refreshTimer);
@@ -300,6 +312,7 @@ function mapEvent(ev){
     raw: ev.summary || '',
     done: priv[STATUS_KEY] === 'done',
     paused: priv[STATUS_KEY] === 'paused',
+    inProgress: priv[STATUS_KEY] === 'cours',
     comment: priv[COMMENT_KEY] || ''
   };
 }
@@ -308,7 +321,7 @@ async function fetchEvents(){
   const { timeMin, timeMax } = windowRange();
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if(res.status === 401){ requestToken(false); return; }
+  if(res.status === 401){ requestSilentReauth(); return; }
   const data = await res.json();
   events = (data.items || []).map(mapEvent);
   renderList();
@@ -399,29 +412,35 @@ function renderList(){
              ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`
           : `<div class="raw">${escapeHtml(ev.raw)}</div>
              ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`;
-        const statusLabel = ev.done ? 'FAIT' : (ev.paused ? 'EN PAUSE' : 'PRÉVU');
+        const statusLabel = ev.done ? 'FAIT' : (ev.paused ? 'EN PAUSE' : (ev.inProgress ? 'EN COURS' : 'PRÉVU'));
         const commentHtml = ev.comment
           ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>`
           : '';
         return `
-          <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''}">
-            <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
-            <div class="body">
-              ${body}
-              ${commentHtml}
-              <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
-                ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
-              </div>
-            </div>
-            <div class="check">
-              <div class="pause-btn ${ev.paused ? 'on' : ''}" data-id="${ev.id}" data-paused="${ev.paused}">
-                <svg class="icon" viewBox="0 0 24 24" fill="#ffc946" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
-              </div>
-              <div class="done-btn" data-id="${ev.id}" data-done="${ev.done}">
-                <div class="checkbox ${ev.done ? 'on' : ''}">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="#0d1f16" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+          <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''} ${ev.inProgress ? 'inprogress' : ''}">
+            <div class="card-top">
+              <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
+              <div class="body">
+                ${body}
+                ${commentHtml}
+                <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
+                  ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
                 </div>
               </div>
+            </div>
+            <div class="card-actions">
+              <button class="action-btn cours-btn ${ev.inProgress ? 'on' : ''}" data-id="${ev.id}" data-active="${ev.inProgress}">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+                En cours
+              </button>
+              <button class="action-btn pause-btn ${ev.paused ? 'on' : ''}" data-id="${ev.id}" data-active="${ev.paused}">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+                Pause
+              </button>
+              <button class="action-btn done-btn ${ev.done ? 'on' : ''}" data-id="${ev.id}" data-active="${ev.done}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+                Fait
+              </button>
             </div>
           </div>`;
       }).join('');
@@ -464,11 +483,14 @@ function renderList(){
 
   document.getElementById('refreshBtn').onclick = fetchEvents;
   document.getElementById('searchBtn').onclick = openSearchModal;
-  document.querySelectorAll('.done-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.done !== 'true' ? 'done' : '');
+  document.querySelectorAll('.cours-btn').forEach(el => {
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
   });
   document.querySelectorAll('.pause-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.paused !== 'true' ? 'paused' : '');
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'paused' : '');
+  });
+  document.querySelectorAll('.done-btn').forEach(el => {
+    el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'done' : '');
   });
   document.querySelectorAll('.comment-btn').forEach(el => {
     el.onclick = () => openCommentModal(el.dataset.id, decodeURIComponent(el.dataset.comment));
@@ -536,7 +558,7 @@ async function runSearch(query){
     + `?singleEvents=true&orderBy=startTime&maxResults=50&q=${encodeURIComponent(query)}`
     + `&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if(res.status === 401){ requestToken(false); return; }
+  if(res.status === 401){ requestSilentReauth(); return; }
   const data = await res.json();
   const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD); // plus récent en premier
 
@@ -548,7 +570,7 @@ async function runSearch(query){
   resultsEl.innerHTML = results.map(ev => {
     const parts = parseParts(ev.raw);
     const dateLabel = ev.startD.toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'});
-    const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : 'Prévu');
+    const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : (ev.inProgress ? 'En cours' : 'Prévu'));
     const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
     return `
       <div class="search-result">
