@@ -37,6 +37,16 @@
   .status{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:12px; color:var(--text-dim);}
   .status .led{width:8px; height:8px; border-radius:50%; background:#555;}
   .status .led.live{background:var(--done); box-shadow:0 0 8px var(--done);}
+  .status .led.lost{background:#ff5555; box-shadow:0 0 8px #ff5555; display:inline-block; margin-right:8px;}
+  .reconnect-btn{
+    display:flex; align-items:center; background:#ff555522; border:1px solid #ff5555;
+    color:#ff9c9c; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:700;
+    cursor:pointer; font-family:inherit; animation: pulse-glow 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse-glow{
+    0%, 100%{ box-shadow:0 0 0 0 #ff555555; }
+    50%{ box-shadow:0 0 0 6px #ff555500; }
+  }
   .status button{
     background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text);
     padding:8px 14px; border-radius:8px; font-size:12px; cursor:pointer; font-family:inherit;
@@ -183,19 +193,19 @@
 
 <div id="app"></div>
 
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 // Le statut et le commentaire sont stockés en propriété privée invisible de l'événement
 // (n'affecte jamais la couleur ni l'apparence de l'événement dans Google Agenda)
 const STATUS_KEY = 'atelier_status';   // 'cours' | 'paused' | 'done' | absent
 const COMMENT_KEY = 'atelier_comment';
 
-let config = null;       // { clientId, calendarId }
-let tokenClient = null;
+let config = null;       // { workerUrl, calendarId }
 let accessToken = null;
 let events = [];
 let pollTimer = null;
+let tokenTimer = null;
+let retryTimer = null;
+let connectionLost = false;
 
 const app = document.getElementById('app');
 
@@ -211,75 +221,78 @@ async function saveConfig(c){
   config = c;
 }
 
+function stopApp(){
+  if(pollTimer) clearInterval(pollTimer);
+  if(tokenTimer) clearTimeout(tokenTimer);
+  if(retryTimer) clearTimeout(retryTimer);
+}
+
 function renderSetup(){
+  stopApp();
   app.innerHTML = `
     <div class="setup">
       <h2>Configuration</h2>
       <p>À faire une fois sur cet appareil. Refais cette étape sur l'autre écran (PC ou tablette) avec les mêmes infos.</p>
-      <label>ID client OAuth (Google Cloud Console)</label>
-      <input id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com" value="${config?.clientId || ''}">
+      <label>URL du relais (Cloudflare Worker)</label>
+      <input id="workerUrl" placeholder="https://xxxx.workers.dev" value="${config?.workerUrl || ''}">
       <label>ID de l'agenda Google</label>
       <input id="calendarId" placeholder="toncompte@gmail.com" value="${config?.calendarId || ''}">
       <button class="primary" id="saveBtn">Enregistrer et continuer</button>
-      <div class="origin">Origine JavaScript à autoriser dans Google Cloud Console pour cet identifiant :<br><b id="originText"></b></div>
     </div>
   `;
-  document.getElementById('originText').textContent = window.location.origin;
   document.getElementById('saveBtn').onclick = async () => {
-    const clientId = document.getElementById('clientId').value.trim();
+    const workerUrl = document.getElementById('workerUrl').value.trim();
     const calendarId = document.getElementById('calendarId').value.trim();
-    if(!clientId || !calendarId) return;
-    await saveConfig({clientId, calendarId});
+    if(!workerUrl || !calendarId) return;
+    await saveConfig({workerUrl, calendarId});
     init();
   };
 }
 
-function renderLogin(){
-  app.innerHTML = `
-    <div class="center-login">
-      <div style="font-size:14px;color:var(--text-dim)">Connecte ce écran à Google Agenda</div>
-      <button id="loginBtn">Se connecter avec Google</button>
-      <div style="font-size:12px;color:var(--text-dim);cursor:pointer;text-decoration:underline" id="reconfig">Modifier la configuration</div>
-    </div>
-  `;
-  document.getElementById('loginBtn').onclick = () => requestToken(true);
-  document.getElementById('reconfig').onclick = () => { config = null; renderSetup(); };
+function renderLoading(){
+  app.innerHTML = `<div class="center-login"><div style="color:var(--text-dim); font-size:14px;">Connexion au relais...</div></div>`;
 }
 
-function requestToken(interactive){
-  if(!tokenClient){
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: config.clientId,
-      scope: SCOPE,
-      callback: (resp) => {
-        if(resp.error){ renderLogin(); return; }
-        accessToken = resp.access_token;
-        scheduleTokenRefresh(resp.expires_in);
-        startApp();
-      }
-    });
+// Récupère un jeton d'accès frais auprès du relais Cloudflare (aucune interaction utilisateur,
+// aucune dépendance aux cookies du navigateur : fonctionne indéfiniment sans surveillance)
+async function getAccessToken(){
+  try{
+    const res = await fetch(config.workerUrl);
+    if(!res.ok) throw new Error('relais indisponible');
+    const data = await res.json();
+    if(!data.access_token) throw new Error('réponse invalide');
+    accessToken = data.access_token;
+    connectionLost = false;
+    if(tokenTimer) clearTimeout(tokenTimer);
+    const delayMs = Math.max((data.expires_in - 300) * 1000, 30000);
+    tokenTimer = setTimeout(getAccessToken, delayMs);
+    return true;
+  }catch(e){
+    markConnectionLost();
+    return false;
   }
-  tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
 }
 
-let refreshTimer = null;
-let lastSilentAttempt = 0;
-const SILENT_RETRY_COOLDOWN = 5 * 60 * 1000; // 5 minutes minimum entre deux tentatives silencieuses
-
-function requestSilentReauth(){
-  const now = Date.now();
-  if(now - lastSilentAttempt < SILENT_RETRY_COOLDOWN){
-    return; // on n'insiste pas, on retentera plus tard (évite le clignotement répété)
+// Requête authentifiée avec retentative automatique et unique si le jeton a expiré entre-temps
+async function authFetch(url, options = {}, allowRetry = true){
+  const opts = { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` } };
+  const res = await fetch(url, opts);
+  if(res.status === 401 && allowRetry){
+    const ok = await getAccessToken();
+    if(ok) return authFetch(url, options, false);
   }
-  lastSilentAttempt = now;
-  requestToken(false);
+  return res;
 }
 
-function scheduleTokenRefresh(expiresInSeconds){
-  if(refreshTimer) clearTimeout(refreshTimer);
-  // se reconnecte en silence 5 minutes avant l'expiration (par défaut ~1h)
-  const delayMs = Math.max((expiresInSeconds - 300) * 1000, 30000);
-  refreshTimer = setTimeout(() => requestToken(false), delayMs);
+function markConnectionLost(){
+  connectionLost = true;
+  renderList();
+  if(retryTimer) clearTimeout(retryTimer);
+  // nouvelle tentative automatique, sans aucune action requise
+  retryTimer = setTimeout(async () => {
+    const ok = await getAccessToken();
+    if(ok) fetchEvents();
+  }, 15000);
 }
 
 const DAYS_AHEAD = 3; // aujourd'hui + 2 jours
@@ -320,8 +333,8 @@ function mapEvent(ev){
 async function fetchEvents(){
   const { timeMin, timeMax } = windowRange();
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if(res.status === 401){ requestSilentReauth(); return; }
+  const res = await authFetch(url);
+  if(!res.ok){ markConnectionLost(); return; }
   const data = await res.json();
   events = (data.items || []).map(mapEvent);
   renderList();
@@ -329,9 +342,9 @@ async function fetchEvents(){
 
 async function patchPrivateProps(id, props){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
-  await fetch(url, {
+  await authFetch(url, {
     method: 'PATCH',
-    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ extendedProperties: { private: props } })
   });
   fetchEvents();
@@ -466,10 +479,13 @@ function renderList(){
         </div>
       </div>
       <div class="status">
-        <div class="led live"></div>
-        Synchronisé
+        ${connectionLost
+          ? `<button id="reconnectBtn" class="reconnect-btn"><span class="led lost"></span>Relais indisponible · nouvelle tentative automatique...</button>`
+          : `<div class="led live"></div>Synchronisé`
+        }
         <button id="searchBtn">🔍 Rechercher</button>
         <button id="refreshBtn">↻ Actualiser</button>
+        <button id="settingsBtn">⚙</button>
       </div>
     </div>
     <div class="counts">
@@ -481,8 +497,15 @@ function renderList(){
     <div class="list">${listHtml}</div>
   `;
 
+  if(connectionLost){
+    document.getElementById('reconnectBtn').onclick = async () => {
+      const ok = await getAccessToken();
+      if(ok) fetchEvents();
+    };
+  }
   document.getElementById('refreshBtn').onclick = fetchEvents;
   document.getElementById('searchBtn').onclick = openSearchModal;
+  document.getElementById('settingsBtn').onclick = renderSetup;
   document.querySelectorAll('.cours-btn').forEach(el => {
     el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
   });
@@ -557,8 +580,8 @@ async function runSearch(query){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`
     + `?singleEvents=true&orderBy=startTime&maxResults=50&q=${encodeURIComponent(query)}`
     + `&timeMin=${timeMin}&timeMax=${timeMax}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }});
-  if(res.status === 401){ requestSilentReauth(); return; }
+  const res = await authFetch(url);
+  if(!res.ok){ resultsEl.innerHTML = `<div class="search-hint">Relais indisponible, réessaie dans quelques secondes.</div>`; return; }
   const data = await res.json();
   const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD); // plus récent en premier
 
@@ -601,14 +624,11 @@ function startApp(){
 async function init(){
   await loadConfig();
   if(!config){ renderSetup(); return; }
-  renderLogin();
-  // tente une reconnexion silencieuse si un token Google est déjà en session navigateur
-  const checkGsi = setInterval(() => {
-    if(window.google && google.accounts){
-      clearInterval(checkGsi);
-      requestToken(false);
-    }
-  }, 200);
+  renderLoading();
+  const ok = await getAccessToken();
+  if(ok){ startApp(); }
+  // en cas d'échec, getAccessToken a déjà déclenché markConnectionLost(),
+  // qui affiche le bandeau et retentera automatiquement — aucune action requise
 }
 
 init();
