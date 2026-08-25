@@ -174,6 +174,11 @@
     width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line-solid);
     background:var(--panel); color:var(--text); font-family:var(--mono); font-size:13px;
   }
+  .setup .checkbox-row{
+    display:flex; align-items:center; gap:8px; margin-top:18px; font-size:13px; color:var(--text-dim);
+    cursor:pointer;
+  }
+  .setup .checkbox-row input{width:auto; padding:0;}
   .setup .primary{
     margin-top:22px; width:100%; padding:14px; border-radius:10px; border:none;
     background:var(--accent); color:#1a0d05; font-weight:700; font-size:14px; cursor:pointer;
@@ -199,15 +204,51 @@
 const STATUS_KEY = 'atelier_status';   // 'cours' | 'paused' | 'done' | absent
 const COMMENT_KEY = 'atelier_comment';
 
-let config = null;       // { workerUrl, calendarId }
+let config = null;       // { workerUrl, calendarId, soundEnabled }
 let accessToken = null;
 let events = [];
 let pollTimer = null;
 let tokenTimer = null;
 let retryTimer = null;
 let connectionLost = false;
+let previousSnapshot = null; // pour détecter les changements entre deux actualisations
+let audioCtx = null;
 
 const app = document.getElementById('app');
+
+// Débloque l'audio dès la première interaction (obligatoire sur mobile/tablette avant de pouvoir jouer un son)
+document.addEventListener('click', () => {
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){}
+  }
+}, { once: false });
+
+function playChime(){
+  if(config?.soundEnabled === false) return;
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.setValueAtTime(1175, now + 0.12);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.45);
+  }catch(e){}
+}
+
+function computeSnapshot(evts){
+  return evts
+    .map(e => `${e.id}:${e.start}:${e.end}:${e.done}:${e.paused}:${e.inProgress}:${e.comment}`)
+    .sort()
+    .join('|');
+}
 
 async function loadConfig(){
   try{
@@ -237,14 +278,16 @@ function renderSetup(){
       <input id="workerUrl" placeholder="https://xxxx.workers.dev" value="${config?.workerUrl || ''}">
       <label>ID de l'agenda Google</label>
       <input id="calendarId" placeholder="toncompte@gmail.com" value="${config?.calendarId || ''}">
+      <label class="checkbox-row"><input type="checkbox" id="soundEnabled" ${config?.soundEnabled === false ? '' : 'checked'}> 🔊 Jouer un son à chaque changement (nouveau véhicule, statut modifié...)</label>
       <button class="primary" id="saveBtn">Enregistrer et continuer</button>
     </div>
   `;
   document.getElementById('saveBtn').onclick = async () => {
     const workerUrl = document.getElementById('workerUrl').value.trim();
     const calendarId = document.getElementById('calendarId').value.trim();
+    const soundEnabled = document.getElementById('soundEnabled').checked;
     if(!workerUrl || !calendarId) return;
-    await saveConfig({workerUrl, calendarId});
+    await saveConfig({workerUrl, calendarId, soundEnabled});
     init();
   };
 }
@@ -337,6 +380,13 @@ async function fetchEvents(){
   if(!res.ok){ markConnectionLost(); return; }
   const data = await res.json();
   events = (data.items || []).map(mapEvent);
+
+  const newSnapshot = computeSnapshot(events);
+  if(previousSnapshot !== null && newSnapshot !== previousSnapshot){
+    playChime();
+  }
+  previousSnapshot = newSnapshot;
+
   renderList();
 }
 
