@@ -228,18 +228,24 @@ function playChime(){
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const ctx = audioCtx;
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, now);
-    osc.frequency.setValueAtTime(1175, now + 0.12);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.45);
+    const startAt = ctx.currentTime;
+
+    // Alarme en rafale : 3 bips stridents montants-descendants, volume élevé
+    for(let i = 0; i < 3; i++){
+      const t0 = startAt + i * 0.26;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1100, t0);
+      osc.frequency.exponentialRampToValueAtTime(1900, t0 + 0.09);
+      osc.frequency.exponentialRampToValueAtTime(1100, t0 + 0.2);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.55, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.24);
+    }
   }catch(e){}
 }
 
