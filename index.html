@@ -674,7 +674,7 @@ function escapeHtml(s){
 function startApp(){
   fetchEvents();
   if(pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchEvents, 30000); // resynchro toutes les 30s
+  pollTimer = setInterval(fetchEvents, 5000); // resynchro toutes les 5s
 }
 
 async function init(){
