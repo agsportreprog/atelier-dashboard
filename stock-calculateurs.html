@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Calculateurs</title>
+<style>
+  :root{
+    --bg: #10131a;
+    --panel: #191d26;
+    --panel-2: #232836;
+    --line-solid: #2e3444;
+    --accent: #2fb0ff;
+    --accent-dim: #2fb0ff1e;
+    --good: #3ecf8e;
+    --good-dim: #3ecf8e22;
+    --warn: #ffc946;
+    --text: #f0f2f5;
+    --text-dim: #8d94a3;
+    --mono: 'SF Mono', 'Consolas', monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,'Segoe UI',Roboto,sans-serif; min-height:100vh;}
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+    padding:20px 28px; border-bottom:1px solid var(--line-solid);
+    background:linear-gradient(180deg,#141822,#10131a);
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand .dot{width:10px; height:10px; border-radius:3px; background:var(--accent); box-shadow:0 0 12px var(--accent);}
+  .brand h1{font-size:16px; font-weight:700; margin:0; letter-spacing:.02em;}
+  .brand .sub{font-size:12px; color:var(--text-dim); font-family:var(--mono); margin-top:2px;}
+  .topbar-actions{display:flex; gap:8px; flex-wrap:wrap;}
+  .ghost-btn{
+    background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text-dim);
+    padding:9px 14px; border-radius:8px; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  .ghost-btn:hover{color:var(--text); border-color:var(--accent);}
+  .sync-dot{width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:2px;}
+  .sync-dot.ok{background:var(--good); box-shadow:0 0 8px var(--good);}
+  .sync-dot.ko{background:#ff5555; box-shadow:0 0 8px #ff5555;}
+
+  .stats{display:flex; gap:10px; padding:16px 28px 0; flex-wrap:wrap;}
+  .stat{
+    font-family:var(--mono); font-size:12px; color:var(--text-dim);
+    border:1px solid var(--line-solid); padding:6px 12px; border-radius:20px;
+  }
+  .stat b{color:var(--text); font-size:14px;}
+
+  .scan-zone{padding:18px 28px 6px;}
+  .scan-box{
+    display:flex; align-items:center; gap:12px; background:var(--panel);
+    border:2px solid var(--accent); border-radius:14px; padding:16px 18px;
+  }
+  .scan-box svg{width:22px; height:22px; color:var(--accent); flex-shrink:0;}
+  .scan-box input{
+    flex:1; background:transparent; border:none; outline:none; color:var(--text);
+    font-family:var(--mono); font-size:16px;
+  }
+  .scan-box input::placeholder{color:var(--text-dim);}
+  .scan-hint{font-size:11px; color:var(--text-dim); margin-top:8px; padding-left:4px;}
+
+  .match-banner{
+    margin:10px 28px 0; background:var(--warn); color:#1a1206; border-radius:12px;
+    padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  }
+  .match-banner .info{font-size:13px; line-height:1.5;}
+  .match-banner .info b{font-size:14px;}
+  .match-banner .actions{display:flex; gap:8px;}
+  .match-banner button{
+    border:none; border-radius:8px; padding:8px 14px; font-weight:700; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  .match-banner .btn-add{background:#1a1206; color:var(--warn);}
+  .match-banner .btn-new{background:#ffffff55; color:#1a1206;}
+
+  .search-zone{padding:18px 28px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .search-zone input{
+    flex:1; min-width:220px; background:var(--panel); border:1px solid var(--line-solid); border-radius:10px;
+    padding:11px 14px; color:var(--text); font-family:inherit; font-size:13px;
+  }
+  .add-manual-btn{
+    background:var(--accent-dim); border:1px solid var(--accent); color:var(--accent);
+    padding:11px 16px; border-radius:10px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;
+  }
+
+  .content{padding:18px 28px 60px;}
+
+  .group-brand{margin-bottom:14px; border:1px solid var(--line-solid); border-radius:14px; overflow:hidden;}
+  .group-brand-header{
+    display:flex; align-items:center; gap:10px; padding:14px 16px; background:var(--panel);
+    cursor:pointer; user-select:none;
+  }
+  .group-brand-header .chev{transition:transform .15s; color:var(--text-dim); font-size:11px;}
+  .group-brand.collapsed .chev{transform:rotate(-90deg);}
+  .group-brand-header .name{font-weight:700; font-size:14px; flex:1;}
+  .group-brand-header .count{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
+  .group-brand-body{background:var(--bg);}
+  .group-brand.collapsed .group-brand-body{display:none;}
+
+  .group-model{border-top:1px solid var(--line-solid);}
+  .group-model-header{
+    display:flex; align-items:center; gap:10px; padding:10px 16px 10px 30px;
+    cursor:pointer; user-select:none; color:var(--text-dim);
+  }
+  .group-model-header .chev{transition:transform .15s; font-size:10px;}
+  .group-model.collapsed .chev{transform:rotate(-90deg);}
+  .group-model-header .name{font-size:13px; font-weight:600; flex:1; color:var(--text);}
+  .group-model-header .count{font-family:var(--mono); font-size:11px;}
+  .group-model.collapsed .items-list{display:none;}
+
+  .items-list{padding:2px 16px 10px 30px; display:flex; flex-direction:column; gap:8px;}
+
+  .item-row{
+    display:flex; align-items:center; gap:14px; background:var(--panel); border:1px solid var(--line-solid);
+    border-radius:10px; padding:12px 14px; flex-wrap:wrap;
+  }
+  .item-row .main{flex:1; min-width:180px;}
+  .item-row .hw{font-family:var(--mono); font-weight:700; font-size:14px;}
+  .item-row .breadcrumb{font-size:11px; color:var(--text-dim); margin-top:2px;}
+  .item-row .raw{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:4px;
+    background:var(--panel-2); display:inline-block; padding:2px 8px; border-radius:6px;}
+  .item-row .meta{font-size:11px; color:var(--text-dim); margin-top:4px;}
+
+  .qty-control{display:flex; align-items:center; gap:8px; background:var(--panel-2); border-radius:10px; padding:4px;}
+  .qty-control button{
+    width:26px; height:26px; border-radius:7px; border:none; background:var(--line-solid); color:var(--text);
+    font-size:15px; cursor:pointer; font-family:inherit; line-height:1;
+  }
+  .qty-control .qty-val{font-family:var(--mono); font-weight:700; min-width:22px; text-align:center; font-size:14px;}
+  .qty-control.zero .qty-val{color:#ff6a6a;}
+
+  .row-actions{display:flex; gap:6px;}
+  .icon-btn{
+    width:32px; height:32px; border-radius:8px; border:1px solid var(--line-solid); background:var(--panel-2);
+    color:var(--text-dim); cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .icon-btn:hover{color:var(--text); border-color:var(--accent);}
+  .icon-btn svg{width:15px; height:15px;}
+
+  .empty-state{padding:60px 20px; text-align:center; color:var(--text-dim);}
+  .empty-state .big{font-size:15px; color:var(--text); margin-bottom:6px;}
+
+  .modal-overlay{
+    position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center;
+    z-index:200; padding:20px; overflow-y:auto;
+  }
+  .modal{
+    background:var(--panel); border:1px solid var(--line-solid); border-radius:16px; padding:26px;
+    width:100%; max-width:480px; margin:auto;
+  }
+  .modal h3{margin:0 0 4px; font-size:17px;}
+  .modal .sub{font-size:12px; color:var(--text-dim); margin-bottom:18px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:11px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em;}
+  .field input, .field textarea{
+    width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
+  }
+  .field textarea{resize:vertical; min-height:60px;}
+  .field.required label::after{content:' *'; color:var(--accent);}
+  .field-row{display:flex; gap:10px;}
+  .field-row .field{flex:1;}
+  .raw-display{
+    font-family:var(--mono); font-size:12px; color:var(--text-dim); background:var(--panel-2);
+    padding:8px 12px; border-radius:8px; margin-bottom:14px; word-break:break-all;
+  }
+  .modal-actions{display:flex; gap:10px; margin-top:18px;}
+  .modal-actions button{flex:1; padding:13px; border-radius:10px; border:none; font-weight:700; font-size:14px; cursor:pointer; font-family:inherit;}
+  .btn-save{background:var(--accent); color:#06131c;}
+  .btn-cancel{background:var(--panel-2); color:var(--text); border:1px solid var(--line-solid) !important;}
+  .btn-delete{background:#ff555522; color:#ff8c8c; border:1px solid #ff555555 !important;}
+
+  ::placeholder{color:var(--text-dim); opacity:.7;}
+</style>
+</head>
+<body>
+
+<input type="file" id="importFile" accept="application/json" style="display:none">
+
+<div class="topbar">
+  <div class="brand">
+    <div class="dot"></div>
+    <div>
+      <h1>Stock Calculateurs</h1>
+      <div class="sub" id="statLine"></div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <span id="syncDot" class="sync-dot ok" title="État de la synchronisation"></span>
+    <button class="ghost-btn" id="exportBtn">⬇ Exporter (sauvegarde)</button>
+    <button class="ghost-btn" id="importBtn">⬆ Importer</button>
+    <button class="ghost-btn" id="settingsBtn">⚙</button>
+  </div>
+</div>
+
+<div class="stats" id="statsRow"></div>
+
+<div class="scan-zone">
+  <div class="scan-box">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V4a1 1 0 0 1 1-1h3M17 3h3a1 1 0 0 1 1 1v3M21 17v3a1 1 0 0 1-1 1h-3M7 21H4a1 1 0 0 1-1-1v-3M7 8v8M11 8v8M15 8v8M19 8v8"/></svg>
+    <input type="text" id="scanInput" placeholder="Scanner un code-barres, ou taper une référence, puis Entrée" autofocus>
+  </div>
+  <div class="scan-hint">Fonctionne avec une douchette (mode clavier) ou en tapant directement au clavier.</div>
+</div>
+
+<div id="matchBannerZone"></div>
+
+<div class="search-zone">
+  <input type="text" id="searchInput" placeholder="🔎 Rechercher (marque, modèle, hardware, notes...)">
+  <button class="add-manual-btn" id="addManualBtn">+ Ajouter manuellement</button>
+</div>
+
+<div class="content" id="content"></div>
+
+<script>
+const STORAGE_KEY = 'calc_stock_items_v1'; // ancien stockage local, utilisé seulement pour la migration initiale
+const CONFIG_KEY = 'calc_stock_config_v1';
+
+let items = [];
+let searchQuery = '';
+let config = null;      // { workerUrl, accessKey }
+let modalOpen = false;  // en pause pendant l'édition, pour éviter tout conflit avec le rafraîchissement automatique
+let pollTimer = null;
+let syncOk = true;
+
+function loadConfig(){
+  try{ return JSON.parse(localStorage.getItem(CONFIG_KEY) || 'null'); }
+  catch(e){ return null; }
+}
+function saveConfig(c){
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(c));
+  config = c;
+}
+
+async function apiCall(method, body){
+  const res = await fetch(config.workerUrl, {
+    method,
+    headers: { 'X-Auth-Key': config.accessKey, 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  if(!res.ok) throw new Error('relais indisponible ou clé incorrecte');
+  return res.json().catch(() => ({}));
+}
+
+// Charge le stock depuis le relais partagé
+async function fetchItemsFromServer(){
+  try{
+    const res = await fetch(config.workerUrl, { headers: { 'X-Auth-Key': config.accessKey } });
+    if(!res.ok) throw new Error('relais indisponible ou clé incorrecte');
+    const data = await res.json();
+    syncOk = true;
+    return Array.isArray(data) ? data : [];
+  }catch(e){
+    syncOk = false;
+    throw e;
+  }
+}
+
+// Envoie le stock complet au relais partagé (appelé après chaque modification)
+function saveItems(){
+  apiCall('PUT', items).then(() => { syncOk = true; renderSyncStatus(); })
+    .catch(() => { syncOk = false; renderSyncStatus(); });
+}
+
+function renderSyncStatus(){
+  const el = document.getElementById('syncDot');
+  if(el) el.className = 'sync-dot ' + (syncOk ? 'ok' : 'ko');
+}
+const KNOWN_BRANDS = ['Bosch','Siemens','Continental','Delphi','Denso','Marelli','Valeo','Sagem','Visteon'];
+const collapsedGroups = new Set();
+
+function normalize(s){ return (s || '').toString().toLowerCase().replace(/\s+/g,''); }
+function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2)); }
+function escapeHtml(s){ const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// ---------- Rendu ----------
+
+function renderAll(){
+  renderStats();
+  renderContent();
+}
+
+function renderStats(){
+  const totalRefs = items.length;
+  const totalQty = items.reduce((s,it) => s + (it.quantity || 0), 0);
+  const brands = new Set(items.map(it => it.brand)).size;
+  document.getElementById('statLine').textContent = `${totalRefs} référence${totalRefs>1?'s':''} · ${totalQty} en stock`;
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat"><b>${totalRefs}</b> références</div>
+    <div class="stat"><b>${totalQty}</b> unités en stock</div>
+    <div class="stat"><b>${brands}</b> marque${brands>1?'s':''}</div>
+  `;
+}
+
+function matchesSearch(it, q){
+  const hay = [it.brand, it.model, it.hardware, it.software, it.rawScan, it.location, it.notes].map(x => (x||'').toLowerCase()).join(' ');
+  return hay.includes(q.toLowerCase());
+}
+
+function renderContent(){
+  const content = document.getElementById('content');
+
+  if(items.length === 0){
+    content.innerHTML = `<div class="empty-state"><div class="big">Aucun calculateur en stock</div>Scanne un code-barres ou clique sur "+ Ajouter manuellement" pour commencer.</div>`;
+    return;
+  }
+
+  if(searchQuery){
+    const results = items.filter(it => matchesSearch(it, searchQuery));
+    if(results.length === 0){
+      content.innerHTML = `<div class="empty-state"><div class="big">Aucun résultat</div>Rien ne correspond à "${escapeHtml(searchQuery)}".</div>`;
+      return;
+    }
+    content.innerHTML = `<div class="items-list" style="padding:0">${results.map(renderItemRow).join('')}</div>`;
+    attachItemListeners();
+    return;
+  }
+
+  // Groupement Marque > Modèle
+  const byBrand = {};
+  items.forEach(it => {
+    const b = it.brand || '(marque non renseignée)';
+    byBrand[b] = byBrand[b] || {};
+    const m = it.model || '(modèle non renseigné)';
+    byBrand[b][m] = byBrand[b][m] || [];
+    byBrand[b][m].push(it);
+  });
+
+  const brandKeys = Object.keys(byBrand).sort((a,b) => a.localeCompare(b));
+
+  content.innerHTML = brandKeys.map(brand => {
+    const models = byBrand[brand];
+    const modelKeys = Object.keys(models).sort((a,b) => a.localeCompare(b));
+    const brandCount = modelKeys.reduce((s,m) => s + models[m].length, 0);
+    const brandCollapsed = collapsedGroups.has('b:' + brand);
+
+    const modelsHtml = modelKeys.map(model => {
+      const list = models[model].sort((a,b) => (a.hardware||'').localeCompare(b.hardware||''));
+      const modelCollapsed = collapsedGroups.has('m:' + brand + '|' + model);
+      return `
+        <div class="group-model ${modelCollapsed ? 'collapsed' : ''}" data-modelkey="m:${escapeHtml(brand)}|${escapeHtml(model)}">
+          <div class="group-model-header">
+            <span class="chev">▾</span>
+            <span class="name">${escapeHtml(model)}</span>
+            <span class="count">${list.length}</span>
+          </div>
+          <div class="items-list">${list.map(renderItemRow).join('')}</div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="group-brand ${brandCollapsed ? 'collapsed' : ''}" data-brandkey="b:${escapeHtml(brand)}">
+        <div class="group-brand-header">
+          <span class="chev">▾</span>
+          <span class="name">${escapeHtml(brand)}</span>
+          <span class="count">${brandCount} référence${brandCount>1?'s':''}</span>
+        </div>
+        <div class="group-brand-body">${modelsHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  // Toggle collapse marque
+  content.querySelectorAll('.group-brand-header').forEach(el => {
+    el.onclick = () => {
+      const key = el.closest('.group-brand').dataset.brandkey;
+      if(collapsedGroups.has(key)) collapsedGroups.delete(key); else collapsedGroups.add(key);
+      renderContent();
+    };
+  });
+  // Toggle collapse modèle
+  content.querySelectorAll('.group-model-header').forEach(el => {
+    el.onclick = () => {
+      const key = el.closest('.group-model').dataset.modelkey;
+      if(collapsedGroups.has(key)) collapsedGroups.delete(key); else collapsedGroups.add(key);
+      renderContent();
+    };
+  });
+
+  attachItemListeners();
+}
+
+function renderItemRow(it){
+  const metaParts = [];
+  if(it.software) metaParts.push(`SW ${escapeHtml(it.software)}`);
+  if(it.location) metaParts.push(`📍 ${escapeHtml(it.location)}`);
+  const meta = metaParts.length ? `<div class="meta">${metaParts.join(' · ')}</div>` : '';
+  const raw = it.rawScan ? `<div class="raw">scan: ${escapeHtml(it.rawScan)}</div>` : '';
+  const qty = it.quantity || 0;
+
+  return `
+    <div class="item-row" data-id="${it.id}">
+      <div class="main">
+        <div class="hw">${escapeHtml(it.hardware || '(sans référence)')}</div>
+        <div class="breadcrumb">${escapeHtml(it.brand || '?')} · ${escapeHtml(it.model || '?')}</div>
+        ${meta}
+        ${raw}
+      </div>
+      <div class="qty-control ${qty === 0 ? 'zero' : ''}">
+        <button class="qty-minus" data-id="${it.id}">−</button>
+        <span class="qty-val">${qty}</span>
+        <button class="qty-plus" data-id="${it.id}">+</button>
+      </div>
+      <div class="row-actions">
+        <div class="icon-btn edit-btn" data-id="${it.id}" title="Modifier">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        </div>
+        <div class="icon-btn delete-btn" data-id="${it.id}" title="Supprimer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6h12Z"/></svg>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function attachItemListeners(){
+  document.querySelectorAll('.qty-plus').forEach(el => el.onclick = () => adjustQty(el.dataset.id, 1));
+  document.querySelectorAll('.qty-minus').forEach(el => el.onclick = () => adjustQty(el.dataset.id, -1));
+  document.querySelectorAll('.edit-btn').forEach(el => el.onclick = () => openEditPanel(null, el.dataset.id));
+  document.querySelectorAll('.delete-btn').forEach(el => el.onclick = () => deleteItem(el.dataset.id));
+}
+
+function adjustQty(id, delta){
+  const it = items.find(i => i.id === id);
+  if(!it) return;
+  it.quantity = Math.max(0, (it.quantity || 0) + delta);
+  saveItems();
+  renderAll();
+}
+
+function deleteItem(id){
+  const it = items.find(i => i.id === id);
+  if(!it) return;
+  if(!confirm(`Supprimer la fiche "${it.hardware || it.brand}" ?`)) return;
+  items = items.filter(i => i.id !== id);
+  saveItems();
+  renderAll();
+}
+
+// ---------- Scan / ajout rapide ----------
+
+const scanInput = document.getElementById('scanInput');
+scanInput.addEventListener('keydown', e => {
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    const value = scanInput.value.trim();
+    scanInput.value = '';
+    if(value) handleScan(value);
+  }
+});
+
+function handleScan(value){
+  const norm = normalize(value);
+  const match = items.find(it => (it.hardware && normalize(it.hardware) === norm) || (it.rawScan && normalize(it.rawScan) === norm));
+  if(match){
+    showMatchBanner(match, value);
+  } else {
+    openEditPanel({ rawScan: value, hardware: '' });
+  }
+}
+
+function showMatchBanner(match, rawValue){
+  const zone = document.getElementById('matchBannerZone');
+  zone.innerHTML = `
+    <div class="match-banner">
+      <div class="info">Déjà en stock : <b>${escapeHtml(match.brand || '?')} ${escapeHtml(match.model || '')} — ${escapeHtml(match.hardware || '')}</b><br>Quantité actuelle : ${match.quantity || 0}</div>
+      <div class="actions">
+        <button class="btn-add" id="matchAddBtn">+1 au stock existant</button>
+        <button class="btn-new" id="matchNewBtn">Créer une fiche différente</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('matchAddBtn').onclick = () => {
+    adjustQty(match.id, 1);
+    zone.innerHTML = '';
+  };
+  document.getElementById('matchNewBtn').onclick = () => {
+    zone.innerHTML = '';
+    openEditPanel({ rawScan: rawValue, hardware: '' });
+  };
+}
+
+document.getElementById('addManualBtn').onclick = () => openEditPanel({});
+
+// ---------- Recherche ----------
+
+document.getElementById('searchInput').addEventListener('input', e => {
+  searchQuery = e.target.value.trim();
+  renderContent();
+});
+
+// ---------- Modale ajout / édition ----------
+
+function openEditPanel(prefill, existingId){
+  modalOpen = true;
+  const editing = !!existingId;
+  const source = editing ? items.find(i => i.id === existingId) : (prefill || {});
+  if(editing && !source) return;
+
+  const brandOptions = [...new Set([...KNOWN_BRANDS, ...items.map(i => i.brand).filter(Boolean)])];
+  const modelsForBrand = (brand) => [...new Set(items.filter(i => i.brand === brand).map(i => i.model).filter(Boolean))];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>${editing ? 'Modifier la fiche' : 'Nouveau calculateur'}</h3>
+      <div class="sub">${editing ? 'Mets à jour les informations ci-dessous.' : 'Renseigne au moins la marque et le numéro hardware.'}</div>
+
+      ${source.rawScan ? `<div class="raw-display">Donnée brute scannée : ${escapeHtml(source.rawScan)}</div>` : ''}
+
+      <div class="field-row">
+        <div class="field required">
+          <label>Marque</label>
+          <input list="brandList" id="f_brand" value="${escapeHtml(source.brand || '')}" placeholder="Bosch, Siemens, Delphi...">
+          <datalist id="brandList">${brandOptions.map(b => `<option value="${escapeHtml(b)}">`).join('')}</datalist>
+        </div>
+        <div class="field">
+          <label>Modèle</label>
+          <input list="modelList" id="f_model" value="${escapeHtml(source.model || '')}" placeholder="EDC15, EDC16C2, SID...">
+          <datalist id="modelList">${modelsForBrand(source.brand || '').map(m => `<option value="${escapeHtml(m)}">`).join('')}</datalist>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field required">
+          <label>Numéro Hardware</label>
+          <input id="f_hardware" value="${escapeHtml(source.hardware || '')}" placeholder="0281...">
+        </div>
+        <div class="field">
+          <label>Numéro Software</label>
+          <input id="f_software" value="${escapeHtml(source.software || '')}" placeholder="optionnel">
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Quantité</label>
+          <input id="f_qty" type="number" min="0" value="${source.quantity != null ? source.quantity : 1}">
+        </div>
+        <div class="field">
+          <label>Emplacement</label>
+          <input id="f_location" value="${escapeHtml(source.location || '')}" placeholder="étagère, boîte...">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="f_notes" placeholder="optionnel">${escapeHtml(source.notes || '')}</textarea>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelBtn">Annuler</button>
+        <button class="btn-save" id="saveBtn">${editing ? 'Enregistrer' : 'Ajouter au stock'}</button>
+      </div>
+      ${editing ? `<button class="btn-delete" id="deleteBtn" style="width:100%; margin-top:10px;">Supprimer cette fiche</button>` : ''}
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const closeModal = () => { overlay.remove(); modalOpen = false; };
+  overlay.onclick = (e) => { if(e.target === overlay) closeModal(); };
+  document.getElementById('cancelBtn').onclick = closeModal;
+
+  // Rafraîchit la liste de modèles suggérés quand la marque change
+  document.getElementById('f_brand').addEventListener('input', (e) => {
+    const dl = document.getElementById('modelList');
+    dl.innerHTML = modelsForBrand(e.target.value).map(m => `<option value="${escapeHtml(m)}">`).join('');
+  });
+
+  document.getElementById('saveBtn').onclick = () => {
+    const brand = document.getElementById('f_brand').value.trim();
+    const hardware = document.getElementById('f_hardware').value.trim();
+    if(!brand || !hardware){
+      alert('La marque et le numéro hardware sont nécessaires.');
+      return;
+    }
+    const data = {
+      brand,
+      model: document.getElementById('f_model').value.trim(),
+      hardware,
+      software: document.getElementById('f_software').value.trim(),
+      quantity: Math.max(0, parseInt(document.getElementById('f_qty').value, 10) || 0),
+      location: document.getElementById('f_location').value.trim(),
+      notes: document.getElementById('f_notes').value.trim(),
+      rawScan: source.rawScan || ''
+    };
+
+    if(editing){
+      Object.assign(source, data);
+    } else {
+      items.push({ id: uid(), ...data, createdAt: Date.now() });
+    }
+    saveItems();
+    closeModal();
+    renderAll();
+  };
+
+  if(editing){
+    document.getElementById('deleteBtn').onclick = () => {
+      closeModal();
+      deleteItem(existingId);
+    };
+  }
+
+  setTimeout(() => document.getElementById('f_brand').focus(), 50);
+}
+
+// ---------- Export / Import ----------
+
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const date = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `stock-calculateurs-${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
+document.getElementById('settingsBtn').onclick = () => { renderSetup(); };
+document.getElementById('importFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const imported = JSON.parse(reader.result);
+      if(!Array.isArray(imported)) throw new Error('format invalide');
+      let added = 0, updated = 0;
+      imported.forEach(imp => {
+        if(!imp.id){ imp.id = uid(); }
+        const existingIdx = items.findIndex(i => i.id === imp.id);
+        if(existingIdx >= 0){ items[existingIdx] = imp; updated++; }
+        else { items.push(imp); added++; }
+      });
+      saveItems();
+      renderAll();
+      alert(`Import terminé : ${added} ajoutée(s), ${updated} mise(s) à jour.`);
+    }catch(err){
+      alert("Le fichier n'a pas pu être importé (format JSON invalide).");
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+});
+
+// ---------- Démarrage ----------
+// ---------- Configuration & démarrage ----------
+
+function renderSetup(){
+  if(pollTimer) clearInterval(pollTimer);
+  document.body.innerHTML = `
+    <div class="modal-overlay" style="background:var(--bg)">
+      <div class="modal">
+        <h3>Configuration</h3>
+        <div class="sub">À faire une fois sur chaque PC. Utilise la même URL et la même clé partout pour voir le même stock.</div>
+        <div class="field required">
+          <label>URL du relais (Cloudflare Worker)</label>
+          <input id="cfgUrl" placeholder="https://xxxx.workers.dev" value="${config?.workerUrl || ''}">
+        </div>
+        <div class="field required">
+          <label>Clé d'accès</label>
+          <input id="cfgKey" placeholder="la clé définie dans le Worker" value="${config?.accessKey || ''}">
+        </div>
+        <div class="modal-actions">
+          <button class="btn-save" id="cfgSaveBtn" style="width:100%">Enregistrer et continuer</button>
+        </div>
+        ${config ? `<div style="text-align:center; margin-top:12px; font-size:12px; color:var(--text-dim); text-decoration:underline; cursor:pointer;" id="cfgCancelBtn">Annuler</div>` : ''}
+      </div>
+    </div>
+  `;
+  document.getElementById('cfgSaveBtn').onclick = async () => {
+    const workerUrl = document.getElementById('cfgUrl').value.trim();
+    const accessKey = document.getElementById('cfgKey').value.trim();
+    if(!workerUrl || !accessKey) return;
+    saveConfig({ workerUrl, accessKey });
+    location.reload();
+  };
+  const cancelEl = document.getElementById('cfgCancelBtn');
+  if(cancelEl) cancelEl.onclick = () => location.reload();
+}
+
+async function startPolling(){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if(modalOpen) return; // on ne touche à rien pendant une édition en cours
+    try{
+      items = await fetchItemsFromServer();
+      renderAll();
+      renderSyncStatus();
+    }catch(e){ renderSyncStatus(); }
+  }, 5000);
+}
+
+async function migrateLocalIfNeeded(){
+  try{
+    const legacy = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    if(legacy.length > 0 && items.length === 0){
+      if(confirm(`Des données trouvées sur ce PC (${legacy.length} référence(s)) — les envoyer vers le stock partagé ?`)){
+        items = legacy;
+        saveItems();
+      }
+    }
+  }catch(e){}
+}
+
+async function init(){
+  config = loadConfig();
+  if(!config){ renderSetup(); return; }
+  try{
+    items = await fetchItemsFromServer();
+  }catch(e){
+    items = [];
+  }
+  await migrateLocalIfNeeded();
+  renderAll();
+  scanInput.focus();
+  startPolling();
+}
+
+init();
+</script>
+</body>
+</html>
