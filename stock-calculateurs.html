@@ -82,6 +82,19 @@
   .match-banner .btn-add{background:#1a1206; color:var(--warn);}
   .match-banner .btn-new{background:#ffffff55; color:#1a1206;}
 
+  .toast-banner{
+    margin:10px 28px 0; background:var(--good); color:#062017; border-radius:12px;
+    padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  }
+  .toast-banner .info{font-size:13px; line-height:1.5;}
+  .toast-banner .info b{font-size:14px;}
+  .toast-banner .actions{display:flex; gap:8px;}
+  .toast-banner button{
+    border:none; border-radius:8px; padding:8px 14px; font-weight:700; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  .toast-banner .btn-undo{background:#062017; color:var(--good);}
+  .toast-banner .btn-new{background:#ffffff55; color:#062017;}
+
   .search-zone{padding:18px 28px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
   .search-zone input{
     flex:1; min-width:220px; background:var(--panel); border:1px solid var(--line-solid); border-radius:10px;
@@ -463,38 +476,54 @@ scanInput.addEventListener('keydown', e => {
   }
 });
 
+function findMatch(hardware, rawScan){
+  const normHw = normalize(hardware || '');
+  const normRaw = normalize(rawScan || '');
+  return items.find(it =>
+    (normHw && it.hardware && normalize(it.hardware) === normHw) ||
+    (normRaw && it.rawScan && normalize(it.rawScan) === normRaw)
+  );
+}
+
 function handleScan(value){
-  const norm = normalize(value);
-  const match = items.find(it => (it.hardware && normalize(it.hardware) === norm) || (it.rawScan && normalize(it.rawScan) === norm));
+  const match = findMatch(value, value);
   if(match){
-    showMatchBanner(match, value);
+    match.quantity = (match.quantity || 0) + 1;
+    saveItems();
+    renderAll();
+    showToast(match, value);
   } else {
     openEditPanel({ rawScan: value, hardware: '' });
   }
 }
 
-function showMatchBanner(match, rawValue){
+function showToast(match, rawValue){
   const zone = document.getElementById('matchBannerZone');
   zone.innerHTML = `
-    <div class="match-banner">
-      <div class="info">Déjà en stock : <b>${escapeHtml(match.brand || '?')} ${escapeHtml(match.model || '')} — ${escapeHtml(match.hardware || '')}</b><br>Quantité actuelle : ${match.quantity || 0}</div>
+    <div class="toast-banner">
+      <div class="info">✓ +1 — <b>${escapeHtml(match.brand || '?')} ${escapeHtml(match.model || '')} — ${escapeHtml(match.hardware || '')}</b> (total : ${match.quantity})</div>
       <div class="actions">
-        <button class="btn-add" id="matchAddBtn">+1 au stock existant</button>
-        <button class="btn-new" id="matchNewBtn">Créer une fiche différente</button>
+        <button class="btn-undo" id="toastUndoBtn">Annuler</button>
+        <button class="btn-new" id="toastNewBtn">Créer une fiche séparée</button>
       </div>
     </div>
   `;
-  document.getElementById('matchAddBtn').onclick = () => {
-    adjustQty(match.id, 1);
+  const timer = setTimeout(() => { zone.innerHTML = ''; }, 5000);
+  document.getElementById('toastUndoBtn').onclick = () => {
+    clearTimeout(timer);
+    adjustQty(match.id, -1);
     zone.innerHTML = '';
   };
-  document.getElementById('matchNewBtn').onclick = () => {
+  document.getElementById('toastNewBtn').onclick = () => {
+    clearTimeout(timer);
+    adjustQty(match.id, -1); // annule l'incrément automatique avant d'ouvrir une fiche distincte
     zone.innerHTML = '';
     openEditPanel({ rawScan: rawValue, hardware: '' });
   };
 }
 
 document.getElementById('addManualBtn').onclick = () => openEditPanel({});
+
 
 // ---------- Recherche ----------
 
@@ -602,7 +631,12 @@ function openEditPanel(prefill, existingId){
     if(editing){
       Object.assign(source, data);
     } else {
-      items.push({ id: uid(), ...data, createdAt: Date.now() });
+      const dup = findMatch(hardware, data.rawScan);
+      if(dup){
+        dup.quantity = (dup.quantity || 0) + data.quantity;
+      } else {
+        items.push({ id: uid(), ...data, createdAt: Date.now() });
+      }
     }
     saveItems();
     closeModal();
