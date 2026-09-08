@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Atelier — Planning du jour</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ff6a2b">
 <style>
   :root{
     --bg: #14161a;
@@ -309,8 +311,6 @@ function renderLoading(){
   app.innerHTML = `<div class="center-login"><div style="color:var(--text-dim); font-size:14px;">Connexion au relais...</div></div>`;
 }
 
-// Récupère un jeton d'accès frais auprès du relais Cloudflare (aucune interaction utilisateur,
-// aucune dépendance aux cookies du navigateur : fonctionne indéfiniment sans surveillance)
 async function getAccessToken(){
   try{
     const res = await fetch(config.workerUrl);
@@ -329,7 +329,6 @@ async function getAccessToken(){
   }
 }
 
-// Requête authentifiée avec retentative automatique et unique si le jeton a expiré entre-temps
 async function authFetch(url, options = {}, allowRetry = true){
   const opts = { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` } };
   const res = await fetch(url, opts);
@@ -344,14 +343,13 @@ function markConnectionLost(){
   connectionLost = true;
   renderList();
   if(retryTimer) clearTimeout(retryTimer);
-  // nouvelle tentative automatique, sans aucune action requise
   retryTimer = setTimeout(async () => {
     const ok = await getAccessToken();
     if(ok) fetchEvents();
   }, 15000);
 }
 
-const DAYS_AHEAD = 3; // aujourd'hui + 2 jours
+const DAYS_AHEAD = 3;
 
 function windowRange(){
   const now = new Date();
@@ -369,7 +367,6 @@ function mapEvent(ev){
   const endRaw = ev.end?.dateTime || ev.end?.date;
   const allDay = !ev.start?.dateTime;
   const startD = new Date(startRaw);
-  // pour un événement "jour entier", la date de fin Google est exclusive : on retire 1 jour
   let endD = new Date(endRaw);
   if(allDay) endD = new Date(endD.getTime() - 24*3600*1000);
   const priv = ev.extendedProperties?.private || {};
@@ -414,7 +411,6 @@ async function patchPrivateProps(id, props){
 }
 
 function setStatus(id, status){
-  // status: 'done' | 'paused' | '' (vide = à faire)
   patchPrivateProps(id, { [STATUS_KEY]: status });
 }
 
@@ -452,7 +448,6 @@ function renderList(){
   const todayKey = dayKey(today);
   const headerDate = today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
 
-  // construit les DAYS_AHEAD jours de la fenêtre
   const days = [];
   for(let i = 0; i < DAYS_AHEAD; i++){
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
@@ -463,7 +458,6 @@ function renderList(){
   days.forEach(d => {
     const key = dayKey(d);
     const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59);
-    // un événement apparaît ce jour-là s'il couvre ce jour (gère les véhicules gardés plusieurs jours)
     const dayEvents = events
       .filter(ev => ev.startD <= dEnd && ev.endD >= d)
       .sort((a, b) => a.startD - b.startD);
@@ -471,7 +465,6 @@ function renderList(){
     const isToday = key === todayKey;
     const label = isToday ? "Aujourd'hui" : d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
 
-    // les véhicules "en pause" ne comptent pas dans les compteurs
     const countedEvents = dayEvents.filter(ev => !ev.paused);
 
     let cardsHtml;
@@ -640,7 +633,6 @@ async function runSearch(query){
   if(!query){ return; }
   resultsEl.innerHTML = `<div class="search-hint">Recherche en cours...</div>`;
 
-  // recherche sur une large plage : 2 ans en arrière jusqu'à 3 mois à l'avance
   const now = new Date();
   const timeMin = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()).toISOString();
   const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
@@ -650,7 +642,7 @@ async function runSearch(query){
   const res = await authFetch(url);
   if(!res.ok){ resultsEl.innerHTML = `<div class="search-hint">Relais indisponible, réessaie dans quelques secondes.</div>`; return; }
   const data = await res.json();
-  const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD); // plus récent en premier
+  const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD);
 
   if(results.length === 0){
     resultsEl.innerHTML = `<div class="search-hint">Aucun résultat pour "${escapeHtml(query)}".</div>`;
@@ -685,7 +677,7 @@ function escapeHtml(s){
 function startApp(){
   fetchEvents();
   if(pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchEvents, 5000); // resynchro toutes les 5s
+  pollTimer = setInterval(fetchEvents, 5000);
 }
 
 async function init(){
@@ -694,12 +686,8 @@ async function init(){
   renderLoading();
   const ok = await getAccessToken();
   if(ok){ startApp(); }
-  // en cas d'échec, getAccessToken a déjà déclenché markConnectionLost(),
-  // qui affiche le bandeau et retentera automatiquement — aucune action requise
 }
 
-// Sécurité : nettoie toute fenêtre (commentaire/recherche) qui serait restée ouverte par erreur
-// et n'aurait pas été retirée — évite qu'un fond assombri reste bloqué à l'écran.
 window.addEventListener('pageshow', () => {
   document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
 });
