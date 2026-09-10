@@ -133,6 +133,16 @@
   .comment-btn{
     font-size:12px; color:var(--accent); margin-top:4px; cursor:pointer; width:fit-content;
   }
+  .tool-tag{
+    display:inline-block; background:var(--panel-2); border:1px solid var(--line-solid);
+    padding:1px 7px; border-radius:5px; font-size:10px; margin-left:6px; color:var(--text-dim);
+    text-transform:none; letter-spacing:0; font-weight:600;
+  }
+  .attachments-list{display:flex; flex-direction:column; gap:3px; margin-top:6px;}
+  .attachment-link{
+    font-size:12px; color:var(--cours); cursor:pointer; width:fit-content;
+  }
+  .attachment-link:hover{text-decoration:underline;}
 
   .modal-overlay{
     position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center;
@@ -224,15 +234,32 @@
 const STATUS_KEY = 'atelier_status';   // 'cours' | 'paused' | 'done' | absent
 const COMMENT_KEY = 'atelier_comment';
 
-let config = null;       // { workerUrl, calendarId, soundEnabled }
+let config = null;       // { workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled }
 let accessToken = null;
 let events = [];
+let remoteTasks = [];
 let pollTimer = null;
+let remoteTasksTimer = null;
+let gmailScanTimer = null;
 let tokenTimer = null;
 let retryTimer = null;
 let connectionLost = false;
 let previousSnapshot = null; // pour détecter les changements entre deux actualisations
 let audioCtx = null;
+
+// Les 5 correspondants habituels pour les dossiers à distance (mails avec fichier à traiter)
+const REMOTE_SENDERS = [
+  'lmhb.auto@gmail.com',
+  'courlay683@gmail.com',
+  'tar.garage63@gmail.com',
+  'latelier-auto@etik.com',
+  'diagautobleslois@gmail.com'
+];
+
+// Détecte l'outil à partir du nom du fichier joint : "slave" dans le nom -> Autotuner, sinon MMS par défaut
+function detectTool(filename){
+  return /slave/i.test(filename || '') ? 'Autotuner' : 'MMS';
+}
 
 const app = document.getElementById('app');
 
@@ -292,6 +319,8 @@ function stopApp(){
   if(pollTimer) clearInterval(pollTimer);
   if(tokenTimer) clearTimeout(tokenTimer);
   if(retryTimer) clearTimeout(retryTimer);
+  if(remoteTasksTimer) clearInterval(remoteTasksTimer);
+  if(gmailScanTimer) clearInterval(gmailScanTimer);
 }
 
 function renderSetup(){
@@ -304,6 +333,10 @@ function renderSetup(){
       <input id="workerUrl" placeholder="https://xxxx.workers.dev" value="${config?.workerUrl || ''}">
       <label>ID de l'agenda Google</label>
       <input id="calendarId" placeholder="toncompte@gmail.com" value="${config?.calendarId || ''}">
+      <label>URL du relais dossiers à distance (optionnel)</label>
+      <input id="remoteWorkerUrl" placeholder="https://remote-tasks-api.xxxx.workers.dev" value="${config?.remoteWorkerUrl || ''}">
+      <label>Clé d'accès dossiers à distance (optionnel)</label>
+      <input id="remoteAccessKey" placeholder="la clé définie dans le Worker" value="${config?.remoteAccessKey || ''}">
       <label class="checkbox-row"><input type="checkbox" id="soundEnabled" ${config?.soundEnabled === false ? '' : 'checked'}> 🔊 Jouer un son à chaque changement (nouveau véhicule, statut modifié...)</label>
       <button class="primary" id="saveBtn">Enregistrer et continuer</button>
     </div>
@@ -311,9 +344,11 @@ function renderSetup(){
   document.getElementById('saveBtn').onclick = async () => {
     const workerUrl = document.getElementById('workerUrl').value.trim();
     const calendarId = document.getElementById('calendarId').value.trim();
+    const remoteWorkerUrl = document.getElementById('remoteWorkerUrl').value.trim();
+    const remoteAccessKey = document.getElementById('remoteAccessKey').value.trim();
     const soundEnabled = document.getElementById('soundEnabled').checked;
     if(!workerUrl || !calendarId) return;
-    await saveConfig({workerUrl, calendarId, soundEnabled});
+    await saveConfig({workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled});
     init();
   };
 }
@@ -397,6 +432,206 @@ function mapEvent(ev){
     inProgress: priv[STATUS_KEY] === 'cours',
     comment: priv[COMMENT_KEY] || ''
   };
+}
+
+// ---------- Dossiers à distance (mails avec fichier à traiter) ----------
+
+async function fetchRemoteTasks(){
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey) return;
+  try{
+    const res = await fetch(config.remoteWorkerUrl, { headers: { 'X-Auth-Key': config.remoteAccessKey } });
+    if(!res.ok) return;
+    remoteTasks = await res.json();
+    renderList();
+  }catch(e){}
+}
+
+async function saveRemoteTasksToServer(){
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey) return;
+  try{
+    await fetch(config.remoteWorkerUrl, {
+      method: 'PUT',
+      headers: { 'X-Auth-Key': config.remoteAccessKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(remoteTasks)
+    });
+  }catch(e){}
+}
+
+function decodeBase64Url(data){
+  try{
+    const base64 = (data || '').replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  }catch(e){ return ''; }
+}
+
+function parseGmailMessage(msg){
+  const headers = msg.payload?.headers || [];
+  const getHeader = (name) => (headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '');
+  const subject = getHeader('Subject');
+  const from = getHeader('From');
+  const fromEmail = ((from.match(/<(.+?)>/) || [null, from])[1] || '').trim().toLowerCase();
+
+  let bodyText = '';
+  const attachments = [];
+  (function walk(part){
+    if(!part) return;
+    if(part.filename && part.body?.attachmentId){
+      attachments.push({ attachmentId: part.body.attachmentId, filename: part.filename });
+    } else if(part.mimeType === 'text/plain' && part.body?.data){
+      bodyText += decodeBase64Url(part.body.data);
+    }
+    (part.parts || []).forEach(walk);
+  })(msg.payload);
+
+  return {
+    subject,
+    fromEmail,
+    bodyText: bodyText.trim(),
+    attachments,
+    receivedAt: new Date(parseInt(msg.internalDate, 10) || Date.now()).toISOString()
+  };
+}
+
+async function scanGmailForNewTasks(){
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey) return;
+  try{
+    const fromQuery = REMOTE_SENDERS.map(e => `from:${e}`).join(' OR ');
+    const q = encodeURIComponent(`(${fromQuery}) has:attachment newer_than:30d in:inbox`);
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=30`;
+    const res = await authFetch(url);
+    if(!res.ok) return;
+    const data = await res.json();
+    const messages = data.messages || [];
+    const existingIds = new Set(remoteTasks.map(t => t.id));
+    const newOnes = messages.filter(m => !existingIds.has(m.id));
+    if(newOnes.length === 0) return;
+
+    let addedAny = false;
+    for(const m of newOnes){
+      const msgRes = await authFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`);
+      if(!msgRes.ok) continue;
+      const msg = await msgRes.json();
+      const parsed = parseGmailMessage(msg);
+      if(parsed.attachments.length === 0) continue;
+      const primaryFile = parsed.attachments.find(a => /\.(mmf|zip)$/i.test(a.filename)) || parsed.attachments[0];
+      remoteTasks.push({
+        id: m.id,
+        from: parsed.fromEmail,
+        subject: parsed.subject,
+        body: parsed.bodyText,
+        receivedAt: parsed.receivedAt,
+        attachments: parsed.attachments,
+        tool: detectTool(primaryFile.filename),
+        status: '',
+        comment: ''
+      });
+      addedAny = true;
+    }
+    if(addedAny){
+      remoteTasks.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+      await saveRemoteTasksToServer();
+      playChime();
+      renderList();
+    }
+  }catch(e){}
+}
+
+function setRemoteStatus(id, status){
+  const t = remoteTasks.find(x => x.id === id);
+  if(!t) return;
+  t.status = status;
+  saveRemoteTasksToServer();
+  renderList();
+}
+
+function setRemoteComment(id, comment){
+  const t = remoteTasks.find(x => x.id === id);
+  if(!t) return;
+  t.comment = comment;
+  saveRemoteTasksToServer();
+  renderList();
+}
+
+async function downloadGmailAttachment(messageId, attachmentId, filename){
+  try{
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${attachmentId}`;
+    const res = await authFetch(url);
+    if(!res.ok){ alert("Impossible de récupérer le fichier pour le moment."); return; }
+    const data = await res.json();
+    const base64 = (data.data || '').replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || 'fichier';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  }catch(e){
+    alert("Impossible de récupérer le fichier pour le moment.");
+  }
+}
+
+function renderRemoteTasksHtml(){
+  const active = remoteTasks.filter(t => t.status !== 'done');
+  if(active.length === 0) return '';
+  const sorted = [...active].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+
+  const cards = sorted.map(t => {
+    const statusLabel = t.status === 'paused' ? 'EN PAUSE' : (t.status === 'cours' ? 'EN COURS' : 'À FAIRE');
+    const dateLabel = new Date(t.receivedAt).toLocaleDateString('fr-FR', {day:'numeric', month:'short'});
+    const attachmentsHtml = (t.attachments || []).map(a => `
+      <div class="attachment-link" data-msgid="${t.id}" data-attid="${a.attachmentId}" data-filename="${escapeHtml(a.filename)}">
+        ⬇ ${escapeHtml(a.filename)}
+      </div>
+    `).join('');
+    const commentHtml = t.comment ? `<div class="comment-text">"${escapeHtml(t.comment)}"</div>` : '';
+    return `
+      <div class="card ${t.status === 'paused' ? 'paused' : ''} ${t.status === 'cours' ? 'inprogress' : ''}">
+        <div class="card-top">
+          <div class="time">${dateLabel}<span>${statusLabel}</span></div>
+          <div class="body">
+            <div class="model">${escapeHtml(t.subject || '(sans objet)')}<span class="tool-tag">${escapeHtml(t.tool)}</span></div>
+            <div class="presta">${escapeHtml(t.from)}</div>
+            ${t.body ? `<div class="raw">${escapeHtml(t.body)}</div>` : ''}
+            <div class="attachments-list">${attachmentsHtml}</div>
+            ${commentHtml}
+            <div class="comment-btn" data-kind="remote" data-id="${t.id}" data-comment="${encodeURIComponent(t.comment || '')}">
+              ${t.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
+            </div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="action-btn cours-btn ${t.status === 'cours' ? 'on' : ''}" data-kind="remote" data-id="${t.id}" data-active="${t.status === 'cours'}">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+            En cours
+          </button>
+          <button class="action-btn pause-btn ${t.status === 'paused' ? 'on' : ''}" data-kind="remote" data-id="${t.id}" data-active="${t.status === 'paused'}">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+            Pause
+          </button>
+          <button class="action-btn done-btn" data-kind="remote" data-id="${t.id}" data-active="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+            Fait
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="day-header">
+      <div class="label">📁 Dossiers à distance</div>
+      <div class="count">${active.length} dossier${active.length > 1 ? 's' : ''}</div>
+    </div>
+    ${cards}
+  `;
 }
 
 async function fetchEvents(){
@@ -574,7 +809,7 @@ function renderList(){
       <div class="pill"><b>${activeEvents.length - doneCount}</b> restants</div>
       ${pausedCount > 0 ? `<div class="pill"><b>${pausedCount}</b> en pause</div>` : ''}
     </div>
-    <div class="list">${listHtml}</div>
+    <div class="list">${renderRemoteTasksHtml()}${listHtml}</div>
   `;
 
   if(connectionLost){
@@ -587,16 +822,28 @@ function renderList(){
   document.getElementById('searchBtn').onclick = openSearchModal;
   document.getElementById('settingsBtn').onclick = renderSetup;
   document.querySelectorAll('.cours-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
+    el.onclick = () => {
+      if(el.dataset.kind === 'remote') setRemoteStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
+      else setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
+    };
   });
   document.querySelectorAll('.pause-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'paused' : '');
+    el.onclick = () => {
+      if(el.dataset.kind === 'remote') setRemoteStatus(el.dataset.id, el.dataset.active !== 'true' ? 'paused' : '');
+      else setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'paused' : '');
+    };
   });
   document.querySelectorAll('.done-btn').forEach(el => {
-    el.onclick = () => setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'done' : '');
+    el.onclick = () => {
+      if(el.dataset.kind === 'remote') setRemoteStatus(el.dataset.id, 'done');
+      else setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'done' : '');
+    };
   });
   document.querySelectorAll('.comment-btn').forEach(el => {
-    el.onclick = () => openCommentModal(el.dataset.id, decodeURIComponent(el.dataset.comment));
+    el.onclick = () => openCommentModal(el.dataset.id, decodeURIComponent(el.dataset.comment), el.dataset.kind === 'remote' ? 'remote' : 'event');
+  });
+  document.querySelectorAll('.attachment-link').forEach(el => {
+    el.onclick = () => downloadGmailAttachment(el.dataset.msgid, el.dataset.attid, el.dataset.filename);
   });
 }
 
@@ -641,12 +888,12 @@ function setupVoiceInput(button, textarea){
   };
 }
 
-function openCommentModal(id, currentComment){
+function openCommentModal(id, currentComment, kind = 'event'){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal">
-      <h3>Commentaire sur ce rendez-vous</h3>
+      <h3>Commentaire sur ${kind === 'remote' ? 'ce dossier' : 'ce rendez-vous'}</h3>
       <div class="textarea-wrap">
         <textarea id="commentInput" placeholder="Ex : plaquettes changées, prévoir contrôle dans 15 jours...">${escapeHtml(currentComment || '')}</textarea>
         <button type="button" id="voiceBtn" class="voice-btn" title="Dictée vocale">🎤</button>
@@ -663,7 +910,8 @@ function openCommentModal(id, currentComment){
   document.getElementById('saveComment').onclick = () => {
     const val = document.getElementById('commentInput').value.trim();
     overlay.remove();
-    setComment(id, val);
+    if(kind === 'remote') setRemoteComment(id, val);
+    else setComment(id, val);
   };
   setupVoiceInput(document.getElementById('voiceBtn'), document.getElementById('commentInput'));
 }
@@ -744,6 +992,16 @@ function startApp(){
   fetchEvents();
   if(pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(fetchEvents, 5000); // resynchro toutes les 5s
+
+  if(config.remoteWorkerUrl && config.remoteAccessKey){
+    fetchRemoteTasks();
+    if(remoteTasksTimer) clearInterval(remoteTasksTimer);
+    remoteTasksTimer = setInterval(fetchRemoteTasks, 5000);
+
+    scanGmailForNewTasks();
+    if(gmailScanTimer) clearInterval(gmailScanTimer);
+    gmailScanTimer = setInterval(scanGmailForNewTasks, 60000); // vérifie les nouveaux mails toutes les 60s
+  }
 }
 
 async function init(){
