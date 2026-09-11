@@ -241,6 +241,7 @@ let remoteTasks = [];
 let pollTimer = null;
 let remoteTasksTimer = null;
 let gmailScanTimer = null;
+let remoteReminderTimer = null;
 let tokenTimer = null;
 let retryTimer = null;
 let connectionLost = false;
@@ -321,6 +322,7 @@ function stopApp(){
   if(retryTimer) clearTimeout(retryTimer);
   if(remoteTasksTimer) clearInterval(remoteTasksTimer);
   if(gmailScanTimer) clearInterval(gmailScanTimer);
+  if(remoteReminderTimer) clearInterval(remoteReminderTimer);
 }
 
 function renderSetup(){
@@ -437,13 +439,22 @@ function mapEvent(ev){
 // ---------- Dossiers à distance (mails avec fichier à traiter) ----------
 
 async function fetchRemoteTasks(){
-  if(!config.remoteWorkerUrl || !config.remoteAccessKey) return;
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey){
+    console.warn('[dossiers à distance] non configuré (URL ou clé manquante)');
+    return;
+  }
   try{
     const res = await fetch(config.remoteWorkerUrl, { headers: { 'X-Auth-Key': config.remoteAccessKey } });
-    if(!res.ok) return;
+    if(!res.ok){
+      console.error('[dossiers à distance] fetchRemoteTasks: réponse HTTP', res.status, await res.text().catch(()=>''));
+      return;
+    }
     remoteTasks = await res.json();
+    console.log('[dossiers à distance] tâches chargées :', remoteTasks.length);
     renderList();
-  }catch(e){}
+  }catch(e){
+    console.error('[dossiers à distance] fetchRemoteTasks a échoué :', e);
+  }
 }
 
 async function saveRemoteTasksToServer(){
@@ -496,26 +507,41 @@ function parseGmailMessage(msg){
 }
 
 async function scanGmailForNewTasks(){
-  if(!config.remoteWorkerUrl || !config.remoteAccessKey) return;
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey){
+    console.warn('[dossiers à distance] scan Gmail ignoré : non configuré');
+    return;
+  }
+  console.log('[dossiers à distance] scan Gmail en cours...');
   try{
     const fromQuery = REMOTE_SENDERS.map(e => `from:${e}`).join(' OR ');
     const q = encodeURIComponent(`(${fromQuery}) has:attachment newer_than:30d in:inbox`);
     const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=30`;
     const res = await authFetch(url);
-    if(!res.ok) return;
+    if(!res.ok){
+      console.error('[dossiers à distance] recherche Gmail : réponse HTTP', res.status, await res.text().catch(()=>''));
+      return;
+    }
     const data = await res.json();
     const messages = data.messages || [];
+    console.log('[dossiers à distance] mails trouvés correspondant aux critères :', messages.length);
     const existingIds = new Set(remoteTasks.map(t => t.id));
     const newOnes = messages.filter(m => !existingIds.has(m.id));
+    console.log('[dossiers à distance] dont nouveaux (pas encore importés) :', newOnes.length);
     if(newOnes.length === 0) return;
 
     let addedAny = false;
     for(const m of newOnes){
       const msgRes = await authFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`);
-      if(!msgRes.ok) continue;
+      if(!msgRes.ok){
+        console.error('[dossiers à distance] échec lecture du message', m.id, msgRes.status);
+        continue;
+      }
       const msg = await msgRes.json();
       const parsed = parseGmailMessage(msg);
-      if(parsed.attachments.length === 0) continue;
+      if(parsed.attachments.length === 0){
+        console.log('[dossiers à distance] message', m.id, 'ignoré : aucune pièce jointe détectée dans le contenu');
+        continue;
+      }
       const primaryFile = parsed.attachments.find(a => /\.(mmf|zip)$/i.test(a.filename)) || parsed.attachments[0];
       remoteTasks.push({
         id: m.id,
@@ -529,6 +555,7 @@ async function scanGmailForNewTasks(){
         comment: ''
       });
       addedAny = true;
+      console.log('[dossiers à distance] fiche ajoutée :', parsed.subject);
     }
     if(addedAny){
       remoteTasks.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
@@ -536,7 +563,9 @@ async function scanGmailForNewTasks(){
       playChime();
       renderList();
     }
-  }catch(e){}
+  }catch(e){
+    console.error('[dossiers à distance] scanGmailForNewTasks a échoué :', e);
+  }
 }
 
 function setRemoteStatus(id, status){
@@ -605,6 +634,9 @@ function renderRemoteTasksHtml(){
             ${commentHtml}
             <div class="comment-btn" data-kind="remote" data-id="${t.id}" data-comment="${encodeURIComponent(t.comment || '')}">
               ${t.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
+            </div>
+            <div class="comment-btn reply-btn" data-to="${encodeURIComponent(t.from)}" data-subject="${encodeURIComponent('Re: ' + (t.subject || ''))}">
+              ✉️ Répondre au mail
             </div>
           </div>
         </div>
@@ -800,6 +832,7 @@ function renderList(){
         }
         <button id="searchBtn">🔍 Rechercher</button>
         <button id="refreshBtn">↻ Actualiser</button>
+        <button id="scanMailBtn">📧 Vérifier les mails</button>
         <button id="settingsBtn">⚙</button>
       </div>
     </div>
@@ -819,6 +852,10 @@ function renderList(){
     };
   }
   document.getElementById('refreshBtn').onclick = fetchEvents;
+  document.getElementById('scanMailBtn').onclick = () => {
+    console.log('[dossiers à distance] vérification manuelle déclenchée');
+    scanGmailForNewTasks();
+  };
   document.getElementById('searchBtn').onclick = openSearchModal;
   document.getElementById('settingsBtn').onclick = renderSetup;
   document.querySelectorAll('.cours-btn').forEach(el => {
@@ -844,6 +881,12 @@ function renderList(){
   });
   document.querySelectorAll('.attachment-link').forEach(el => {
     el.onclick = () => downloadGmailAttachment(el.dataset.msgid, el.dataset.attid, el.dataset.filename);
+  });
+  document.querySelectorAll('.reply-btn').forEach(el => {
+    el.onclick = () => {
+      const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${el.dataset.to}&su=${el.dataset.subject}`;
+      window.open(url, '_blank');
+    };
   });
 }
 
@@ -946,7 +989,27 @@ async function runSearch(query){
   if(!query){ return; }
   resultsEl.innerHTML = `<div class="search-hint">Recherche en cours...</div>`;
 
-  // recherche sur une large plage : 2 ans en arrière jusqu'à 3 mois à l'avance
+  // recherche immédiate dans les dossiers à distance déjà chargés (pas de requête réseau nécessaire)
+  const q = query.toLowerCase();
+  const remoteMatches = remoteTasks.filter(t => {
+    const hay = `${t.subject} ${t.body} ${t.from} ${(t.attachments || []).map(a => a.filename).join(' ')}`.toLowerCase();
+    return hay.includes(q);
+  }).map(t => ({
+    date: new Date(t.receivedAt),
+    html: `
+      <div class="search-result">
+        <div class="sr-date">${new Date(t.receivedAt).toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'})}</div>
+        <div class="sr-body">
+          <div class="sr-title">📁 ${escapeHtml(t.subject || '(sans objet)')}</div>
+          <div class="sr-phone">${escapeHtml(t.from)}</div>
+          ${t.comment ? `<div class="comment-text">"${escapeHtml(t.comment)}"</div>` : ''}
+        </div>
+        <div class="sr-status">${t.status === 'done' ? 'Fait' : (t.status === 'paused' ? 'En pause' : (t.status === 'cours' ? 'En cours' : 'À faire'))}</div>
+      </div>
+    `
+  }));
+
+  // recherche sur une large plage d'agenda : 2 ans en arrière jusqu'à 3 mois à l'avance
   const now = new Date();
   const timeMin = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()).toISOString();
   const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
@@ -954,32 +1017,38 @@ async function runSearch(query){
     + `?singleEvents=true&orderBy=startTime&maxResults=50&q=${encodeURIComponent(query)}`
     + `&timeMin=${timeMin}&timeMax=${timeMax}`;
   const res = await authFetch(url);
-  if(!res.ok){ resultsEl.innerHTML = `<div class="search-hint">Relais indisponible, réessaie dans quelques secondes.</div>`; return; }
-  const data = await res.json();
-  const results = (data.items || []).map(mapEvent).sort((a,b) => b.startD - a.startD); // plus récent en premier
+  let eventMatches = [];
+  if(res.ok){
+    const data = await res.json();
+    eventMatches = (data.items || []).map(mapEvent).map(ev => {
+      const parts = parseParts(ev.raw);
+      const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
+      const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : (ev.inProgress ? 'En cours' : 'Prévu'));
+      return {
+        date: ev.startD,
+        html: `
+          <div class="search-result">
+            <div class="sr-date">${ev.startD.toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'})}</div>
+            <div class="sr-body">
+              <div class="sr-title">${escapeHtml(label)}</div>
+              ${parts?.phone ? `<div class="sr-phone">${escapeHtml(parts.phone)}</div>` : ''}
+              ${ev.comment ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>` : ''}
+            </div>
+            <div class="sr-status">${statusLabel}</div>
+          </div>
+        `
+      };
+    });
+  }
 
-  if(results.length === 0){
+  const allResults = [...remoteMatches, ...eventMatches].sort((a, b) => b.date - a.date);
+
+  if(allResults.length === 0){
     resultsEl.innerHTML = `<div class="search-hint">Aucun résultat pour "${escapeHtml(query)}".</div>`;
     return;
   }
 
-  resultsEl.innerHTML = results.map(ev => {
-    const parts = parseParts(ev.raw);
-    const dateLabel = ev.startD.toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'});
-    const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : (ev.inProgress ? 'En cours' : 'Prévu'));
-    const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
-    return `
-      <div class="search-result">
-        <div class="sr-date">${dateLabel}</div>
-        <div class="sr-body">
-          <div class="sr-title">${escapeHtml(label)}</div>
-          ${parts?.phone ? `<div class="sr-phone">${escapeHtml(parts.phone)}</div>` : ''}
-          ${ev.comment ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>` : ''}
-        </div>
-        <div class="sr-status">${statusLabel}</div>
-      </div>
-    `;
-  }).join('');
+  resultsEl.innerHTML = allResults.map(r => r.html).join('');
 }
 
 function escapeHtml(s){
@@ -1001,6 +1070,12 @@ function startApp(){
     scanGmailForNewTasks();
     if(gmailScanTimer) clearInterval(gmailScanTimer);
     gmailScanTimer = setInterval(scanGmailForNewTasks, 60000); // vérifie les nouveaux mails toutes les 60s
+
+    if(remoteReminderTimer) clearInterval(remoteReminderTimer);
+    remoteReminderTimer = setInterval(() => {
+      const untouched = remoteTasks.some(t => t.status === '');
+      if(untouched) playChime();
+    }, 20 * 60 * 1000); // rappel toutes les 20 min s'il reste un dossier jamais commencé
   }
 }
 
