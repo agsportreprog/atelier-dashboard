@@ -176,6 +176,7 @@
   .modal .btn-cancel{background:var(--panel-2); color:var(--text); border:1px solid var(--line-solid) !important;}
   .modal .field{margin-bottom:14px;}
   .modal .field label{display:block; font-size:11px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em;}
+  .modal .field.required label::after{content:' *'; color:var(--accent);}
   .modal .field input{
     width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid);
     background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
@@ -726,6 +727,106 @@ function setComment(id, comment){
   patchPrivateProps(id, { [COMMENT_KEY]: comment });
 }
 
+async function createCalendarEvent({nom, voiture, presta, numero, commentaire, date, startTime, endTime}){
+  const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
+  const summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
+  const body = {
+    summary,
+    start: { dateTime: `${date}T${startTime}:00`, timeZone: 'Europe/Paris' },
+    end: { dateTime: `${date}T${endTime}:00`, timeZone: 'Europe/Paris' }
+  };
+  const res = await authFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    alert("Impossible de créer le rendez-vous. Réessaie dans quelques instants.");
+    return false;
+  }
+  const created = await res.json();
+  if(commentaire){
+    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire });
+  }
+  return true;
+}
+
+function openNewEventModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const today = new Date().toISOString().slice(0, 10);
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Nouveau rendez-vous</h3>
+      <div class="field required">
+        <label>Nom du client</label>
+        <input id="newNom" placeholder="ex : Mr Dupont">
+      </div>
+      <div class="field required">
+        <label>Voiture</label>
+        <input id="newVoiture" placeholder="ex : Peugeot 208 GTi">
+      </div>
+      <div class="field">
+        <label>Prestation</label>
+        <input id="newPresta" placeholder="ex : Reprog Stage 1">
+      </div>
+      <div class="field">
+        <label>Numéro de téléphone</label>
+        <input id="newNumero" placeholder="ex : 06 12 34 56 78">
+      </div>
+      <div class="field required">
+        <label>Date</label>
+        <input id="newDate" type="date" value="${today}">
+      </div>
+      <div class="field required">
+        <label>Heure de début</label>
+        <input id="newStartTime" type="time" value="09:00">
+      </div>
+      <div class="field required">
+        <label>Heure de fin</label>
+        <input id="newEndTime" type="time" value="10:00">
+      </div>
+      <div class="field">
+        <label>Commentaires</label>
+        <textarea id="newComment" placeholder="optionnel"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelNewEvent">Annuler</button>
+        <button class="btn-save" id="saveNewEvent">Créer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelNewEvent').onclick = () => overlay.remove();
+  document.getElementById('saveNewEvent').onclick = async () => {
+    const nom = document.getElementById('newNom').value.trim();
+    const voiture = document.getElementById('newVoiture').value.trim();
+    const presta = document.getElementById('newPresta').value.trim();
+    const numero = document.getElementById('newNumero').value.trim();
+    const commentaire = document.getElementById('newComment').value.trim();
+    const date = document.getElementById('newDate').value;
+    const startTime = document.getElementById('newStartTime').value;
+    const endTime = document.getElementById('newEndTime').value;
+    if(!nom || !voiture || !date || !startTime || !endTime){
+      alert('Renseigne au moins le nom, la voiture, la date et les horaires.');
+      return;
+    }
+    const saveBtn = document.getElementById('saveNewEvent');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Création...';
+    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, date, startTime, endTime});
+    if(ok){
+      overlay.remove();
+      fetchEvents();
+    } else {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Créer';
+    }
+  };
+}
+
 function setPerf(id, values){
   patchPrivateProps(id, {
     [PERF_BEFORE_KEY]: values.before,
@@ -1027,6 +1128,7 @@ function renderList(){
           : `<div class="led live"></div>Synchronisé`
         }
         <button id="searchBtn">🔍 Rechercher</button>
+        <button id="newEventBtn">+ Nouveau RDV</button>
         <button id="refreshBtn">↻ Actualiser</button>
         <button id="scanMailBtn">📧 Vérifier les mails</button>
         <button id="settingsBtn">⚙</button>
@@ -1053,6 +1155,7 @@ function renderList(){
     scanGmailForNewTasks();
   };
   document.getElementById('searchBtn').onclick = openSearchModal;
+  document.getElementById('newEventBtn').onclick = openNewEventModal;
   document.getElementById('settingsBtn').onclick = renderSetup;
   document.querySelectorAll('.cours-btn').forEach(el => {
     el.onclick = () => {
