@@ -740,8 +740,6 @@ function setPerf(id, values){
 }
 
 function printPerfReport(ev){
-  const parts = parseParts(ev.raw);
-  const model = parts ? parts.model : ev.raw;
   const before = ev.perfBefore || '';
   const after = ev.perfAfter || '';
   const before060 = ev.perf060Before || '';
@@ -761,16 +759,16 @@ function printPerfReport(ev){
   const rows060 = (before060 || after060) ? `
     <tr><td class="label">0-60 km/h d'origine</td><td>${escapeHtml(before060 || '—')}</td></tr>
     <tr><td class="label">0-60 km/h après reprogrammation</td><td>${escapeHtml(after060 || '—')}</td></tr>
-    <tr><td class="label">Gain 0-60</td><td>${gainOf(before060, after060)}</td></tr>
+    <tr class="gain-row"><td class="label">Gain 0-60</td><td>${gainOf(before060, after060)}</td></tr>
   ` : '';
 
   const rowsPower = (ev.hpBefore || ev.hpAfter || ev.torqueBefore || ev.torqueAfter) ? `
     <tr><td class="label">Puissance d'origine (approx.)</td><td>${escapeHtml(ev.hpBefore || '—')} ch</td></tr>
     <tr><td class="label">Puissance après reprogrammation (approx.)</td><td>${escapeHtml(ev.hpAfter || '—')} ch</td></tr>
-    <tr><td class="label">Gain puissance</td><td>${gainPlusOf(ev.hpBefore, ev.hpAfter, 'ch')}</td></tr>
+    <tr class="gain-row"><td class="label">Gain puissance</td><td>${gainPlusOf(ev.hpBefore, ev.hpAfter, 'ch')}</td></tr>
     <tr><td class="label">Couple d'origine (approx.)</td><td>${escapeHtml(ev.torqueBefore || '—')} Nm</td></tr>
     <tr><td class="label">Couple après reprogrammation (approx.)</td><td>${escapeHtml(ev.torqueAfter || '—')} Nm</td></tr>
-    <tr><td class="label">Gain couple</td><td>${gainPlusOf(ev.torqueBefore, ev.torqueAfter, 'Nm')}</td></tr>
+    <tr class="gain-row"><td class="label">Gain couple</td><td>${gainPlusOf(ev.torqueBefore, ev.torqueAfter, 'Nm')}</td></tr>
   ` : '';
 
   const html = `<!DOCTYPE html>
@@ -785,20 +783,22 @@ function printPerfReport(ev){
   table{ width:100%; border-collapse:collapse; margin-top:10px; }
   td{ padding:14px 16px; border:1px solid #ddd; font-size:15px; }
   td.label{ background:#f4f4f4; font-weight:600; width:50%; }
+  tr.gain-row td{ background:#ff6a2b; color:#fff; font-weight:700; }
+  tr.gain-row td.label{ background:#e55a1c; }
   .brand{ font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:#ff6a2b; font-weight:700; margin-bottom:8px; }
   .footer{ margin-top:36px; font-size:11px; color:#999; line-height:1.5; }
-  @media print{ body{ padding:15px; } }
+  @media print{ body{ padding:15px; } tr.gain-row td{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 </style>
 </head>
 <body>
   <div class="brand">AG Sport Reprog</div>
   <h1>Rapport de performance — Augmentation de puissance</h1>
-  <div class="sub">Véhicule : ${escapeHtml(model)} &nbsp;·&nbsp; Édité le ${dateStr}</div>
+  <div class="sub">Édité le ${dateStr}</div>
   <table>
     ${rows060}
     <tr><td class="label">0-100 km/h d'origine</td><td>${escapeHtml(before || '—')}</td></tr>
     <tr><td class="label">0-100 km/h après reprogrammation</td><td>${escapeHtml(after || '—')}</td></tr>
-    <tr><td class="label">Gain 0-100</td><td>${gainOf(before, after)}</td></tr>
+    <tr class="gain-row"><td class="label">Gain 0-100</td><td>${gainOf(before, after)}</td></tr>
     ${rowsPower}
   </table>
   <div class="footer">Mesures effectuées à l'aide d'un récepteur GPS (Dragy ou équivalent). Valeurs de puissance et couple approximatives (estimation atelier, non certifiées banc de puissance). Résultats donnés à titre indicatif, pouvant varier selon les conditions (météo, revêtement, charge du véhicule).</div>
