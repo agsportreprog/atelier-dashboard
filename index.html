@@ -202,6 +202,15 @@
     border-radius:50%; width:13px; height:13px; display:flex; align-items:center; justify-content:center; font-weight:700;
   }
   .mc-cell.mc-selected .mc-count{background:#1a0d05; color:var(--accent);}
+  .modal-newevent{max-width:960px; max-height:90vh; overflow-y:auto;}
+  .newevent-columns{display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start;}
+  .newevent-left{flex:1 1 340px; min-width:280px;}
+  .newevent-right{flex:1 1 340px; min-width:280px; border-left:1px solid var(--line-solid); padding-left:28px;}
+  @media (max-width: 720px){
+    .newevent-right{border-left:none; padding-left:0; border-top:1px solid var(--line-solid); padding-top:20px; margin-top:8px;}
+  }
+  .day-agenda-title{font-size:13px; font-weight:700; margin-bottom:12px; text-transform:capitalize; color:var(--text);}
+  #dayAgendaPanel .search-result{margin-bottom:8px;}
   .perf-actions{display:flex; gap:14px; margin-top:4px; flex-wrap:wrap;}
 
   .modal-search{max-width:560px;}
@@ -781,44 +790,52 @@ async function openNewEventModal(){
   let monthOffset = 0;
   let selectedDate = today;
   let countsByDate = {};
+  let allUpcomingEvents = [];
 
   overlay.innerHTML = `
     <div class="modal modal-newevent">
       <h3>Nouveau rendez-vous</h3>
-      <div class="field required">
-        <label>Nom du client</label>
-        <input id="newNom" placeholder="ex : Mr Dupont">
-      </div>
-      <div class="field required">
-        <label>Voiture</label>
-        <input id="newVoiture" placeholder="ex : Peugeot 208 GTi">
-      </div>
-      <div class="field">
-        <label>Prestation</label>
-        <input id="newPresta" placeholder="ex : Reprog Stage 1">
-      </div>
-      <div class="field">
-        <label>Numéro de téléphone</label>
-        <input id="newNumero" placeholder="ex : 06 12 34 56 78">
-      </div>
+      <div class="newevent-columns">
+        <div class="newevent-left">
+          <div class="field required">
+            <label>Nom du client</label>
+            <input id="newNom" placeholder="ex : Mr Dupont">
+          </div>
+          <div class="field required">
+            <label>Voiture</label>
+            <input id="newVoiture" placeholder="ex : Peugeot 208 GTi">
+          </div>
+          <div class="field">
+            <label>Prestation</label>
+            <input id="newPresta" placeholder="ex : Reprog Stage 1">
+          </div>
+          <div class="field">
+            <label>Numéro de téléphone</label>
+            <input id="newNumero" placeholder="ex : 06 12 34 56 78">
+          </div>
 
-      <div class="field required">
-        <label>Date <span class="mc-loading" id="mcLoading">(chargement du planning...)</span></label>
-        <div class="mini-cal" id="miniCal"></div>
-        <input id="newDate" type="date" value="${today}" style="margin-top:8px;">
-      </div>
+          <div class="field required">
+            <label>Date <span class="mc-loading" id="mcLoading">(chargement du planning...)</span></label>
+            <div class="mini-cal" id="miniCal"></div>
+            <input id="newDate" type="date" value="${today}" style="margin-top:8px;">
+          </div>
 
-      <div class="field required">
-        <label>Heure de début</label>
-        <input id="newStartTime" type="time" value="09:00">
-      </div>
-      <div class="field required">
-        <label>Heure de fin</label>
-        <input id="newEndTime" type="time" value="10:00">
-      </div>
-      <div class="field">
-        <label>Commentaires</label>
-        <textarea id="newComment" placeholder="optionnel"></textarea>
+          <div class="field required">
+            <label>Heure de début</label>
+            <input id="newStartTime" type="time" value="09:00">
+          </div>
+          <div class="field required">
+            <label>Heure de fin</label>
+            <input id="newEndTime" type="time" value="10:00">
+          </div>
+          <div class="field">
+            <label>Commentaires</label>
+            <textarea id="newComment" placeholder="optionnel"></textarea>
+          </div>
+        </div>
+        <div class="newevent-right">
+          <div id="dayAgendaPanel"><div class="search-hint">Chargement du planning...</div></div>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="cancelNewEvent">Annuler</button>
@@ -869,18 +886,49 @@ async function openNewEventModal(){
         selectedDate = el.dataset.date;
         document.getElementById('newDate').value = selectedDate;
         renderMiniCal();
+        renderDayAgenda();
       };
     });
+  }
+
+  function renderDayAgenda(){
+    const panel = document.getElementById('dayAgendaPanel');
+    if(!panel) return;
+    const dayEvents = allUpcomingEvents
+      .filter(ev => ev.dateStr === selectedDate)
+      .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+    const dateLabel = new Date(selectedDate + 'T00:00:00').toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+    if(dayEvents.length === 0){
+      panel.innerHTML = `<div class="day-agenda-title">${dateLabel}</div><div class="search-hint">Aucun rendez-vous ce jour — journée libre.</div>`;
+      return;
+    }
+    panel.innerHTML = `
+      <div class="day-agenda-title">${dateLabel} — ${dayEvents.length} RDV déjà pris</div>
+      ${dayEvents.map(ev => {
+        const parts = parseParts(ev.raw);
+        const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
+        const timeLabel = ev.allDay ? 'Jour entier' : `${fmtTime(ev.start)} → ${fmtTime(ev.end)}`;
+        return `
+          <div class="search-result">
+            <div class="sr-date">${timeLabel}</div>
+            <div class="sr-body"><div class="sr-title">${escapeHtml(label)}</div></div>
+          </div>
+        `;
+      }).join('')}
+    `;
   }
 
   document.getElementById('newDate').addEventListener('change', (e) => {
     selectedDate = e.target.value;
     renderMiniCal();
+    renderDayAgenda();
   });
 
   renderMiniCal();
+  renderDayAgenda();
 
-  // Charge la charge des 3 prochains mois pour afficher le nombre de RDV par jour
+  // Charge les rendez-vous des 3 prochains mois : compte par jour + détail pour le jour sélectionné
   try{
     const timeMin = now.toISOString();
     const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
@@ -888,17 +936,28 @@ async function openNewEventModal(){
     const res = await authFetch(url);
     if(res.ok){
       const data = await res.json();
+      allUpcomingEvents = (data.items || []).map(ev => {
+        const startRaw = ev.start?.dateTime || ev.start?.date;
+        const endRaw = ev.end?.dateTime || ev.end?.date;
+        return {
+          id: ev.id,
+          start: startRaw,
+          end: endRaw,
+          allDay: !ev.start?.dateTime,
+          raw: ev.summary || '',
+          dateStr: (startRaw || '').slice(0, 10)
+        };
+      });
       countsByDate = {};
-      (data.items || []).forEach(ev => {
-        const d = ev.start?.dateTime || ev.start?.date;
-        if(!d) return;
-        countsByDate[d.slice(0, 10)] = (countsByDate[d.slice(0, 10)] || 0) + 1;
+      allUpcomingEvents.forEach(ev => {
+        countsByDate[ev.dateStr] = (countsByDate[ev.dateStr] || 0) + 1;
       });
     }
   }catch(e){}
   const loadingEl = document.getElementById('mcLoading');
   if(loadingEl) loadingEl.remove();
   renderMiniCal();
+  renderDayAgenda();
 
   document.getElementById('saveNewEvent').onclick = async () => {
     const nom = document.getElementById('newNom').value.trim();
