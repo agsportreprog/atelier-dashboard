@@ -182,6 +182,26 @@
     background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
   }
   .perf-summary{font-size:12px; color:var(--text-dim); margin-top:6px; font-family:var(--mono);}
+  .mini-cal{background:var(--panel-2); border:1px solid var(--line-solid); border-radius:10px; padding:10px; margin-top:4px;}
+  .mc-loading{text-transform:none; letter-spacing:0; font-size:11px; color:var(--text-dim); font-weight:400;}
+  .mc-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .mc-title{font-size:13px; font-weight:700; text-transform:capitalize; color:var(--text);}
+  .mc-nav{background:var(--panel); border:1px solid var(--line-solid); color:var(--text); width:26px; height:26px; border-radius:6px; cursor:pointer; font-size:14px; line-height:1;}
+  .mc-weekdays{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:10px; color:var(--text-dim); margin-bottom:4px;}
+  .mc-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:3px;}
+  .mc-cell{
+    position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+    border-radius:6px; font-size:12px; cursor:pointer; background:var(--panel); color:var(--text);
+  }
+  .mc-cell.mc-empty{visibility:hidden; cursor:default;}
+  .mc-cell.mc-past{opacity:.3; cursor:default;}
+  .mc-cell.mc-busy{background:var(--accent-dim); color:var(--accent); font-weight:600;}
+  .mc-cell.mc-selected{background:var(--accent); color:#1a0d05; font-weight:700;}
+  .mc-count{
+    position:absolute; bottom:1px; right:1px; font-size:8px; background:var(--accent); color:#1a0d05;
+    border-radius:50%; width:13px; height:13px; display:flex; align-items:center; justify-content:center; font-weight:700;
+  }
+  .mc-cell.mc-selected .mc-count{background:#1a0d05; color:var(--accent);}
   .perf-actions{display:flex; gap:14px; margin-top:4px; flex-wrap:wrap;}
 
   .modal-search{max-width:560px;}
@@ -752,12 +772,18 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, d
   return true;
 }
 
-function openNewEventModal(){
+async function openNewEventModal(){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  let monthOffset = 0;
+  let selectedDate = today;
+  let countsByDate = {};
+
   overlay.innerHTML = `
-    <div class="modal">
+    <div class="modal modal-newevent">
       <h3>Nouveau rendez-vous</h3>
       <div class="field required">
         <label>Nom du client</label>
@@ -775,10 +801,13 @@ function openNewEventModal(){
         <label>Numéro de téléphone</label>
         <input id="newNumero" placeholder="ex : 06 12 34 56 78">
       </div>
+
       <div class="field required">
-        <label>Date</label>
-        <input id="newDate" type="date" value="${today}">
+        <label>Date <span class="mc-loading" id="mcLoading">(chargement du planning...)</span></label>
+        <div class="mini-cal" id="miniCal"></div>
+        <input id="newDate" type="date" value="${today}" style="margin-top:8px;">
       </div>
+
       <div class="field required">
         <label>Heure de début</label>
         <input id="newStartTime" type="time" value="09:00">
@@ -800,6 +829,77 @@ function openNewEventModal(){
   document.body.appendChild(overlay);
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
   document.getElementById('cancelNewEvent').onclick = () => overlay.remove();
+
+  function renderMiniCal(){
+    const base = new Date();
+    const viewDate = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const startWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // lundi = 0
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const monthLabel = viewDate.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+    const todayMidnight = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+
+    let cells = '';
+    for(let i = 0; i < startWeekday; i++) cells += `<div class="mc-cell mc-empty"></div>`;
+    for(let d = 1; d <= daysInMonth; d++){
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dateObj = new Date(year, month, d);
+      const count = countsByDate[dateStr] || 0;
+      const isPast = dateObj < todayMidnight;
+      const isSelected = dateStr === selectedDate;
+      cells += `<div class="mc-cell ${isPast ? 'mc-past' : ''} ${isSelected ? 'mc-selected' : ''} ${(count > 0 && !isPast) ? 'mc-busy' : ''}" data-date="${dateStr}">
+        <span class="mc-day">${d}</span>${(count > 0 && !isPast) ? `<span class="mc-count">${count}</span>` : ''}
+      </div>`;
+    }
+
+    document.getElementById('miniCal').innerHTML = `
+      <div class="mc-header">
+        <button type="button" class="mc-nav" id="mcPrev">‹</button>
+        <span class="mc-title">${monthLabel}</span>
+        <button type="button" class="mc-nav" id="mcNext">›</button>
+      </div>
+      <div class="mc-weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+      <div class="mc-grid">${cells}</div>
+    `;
+    document.getElementById('mcPrev').onclick = () => { monthOffset--; renderMiniCal(); };
+    document.getElementById('mcNext').onclick = () => { monthOffset++; renderMiniCal(); };
+    document.querySelectorAll('.mc-cell:not(.mc-empty):not(.mc-past)').forEach(el => {
+      el.onclick = () => {
+        selectedDate = el.dataset.date;
+        document.getElementById('newDate').value = selectedDate;
+        renderMiniCal();
+      };
+    });
+  }
+
+  document.getElementById('newDate').addEventListener('change', (e) => {
+    selectedDate = e.target.value;
+    renderMiniCal();
+  });
+
+  renderMiniCal();
+
+  // Charge la charge des 3 prochains mois pour afficher le nombre de RDV par jour
+  try{
+    const timeMin = now.toISOString();
+    const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin=${timeMin}&timeMax=${timeMax}`;
+    const res = await authFetch(url);
+    if(res.ok){
+      const data = await res.json();
+      countsByDate = {};
+      (data.items || []).forEach(ev => {
+        const d = ev.start?.dateTime || ev.start?.date;
+        if(!d) return;
+        countsByDate[d.slice(0, 10)] = (countsByDate[d.slice(0, 10)] || 0) + 1;
+      });
+    }
+  }catch(e){}
+  const loadingEl = document.getElementById('mcLoading');
+  if(loadingEl) loadingEl.remove();
+  renderMiniCal();
+
   document.getElementById('saveNewEvent').onclick = async () => {
     const nom = document.getElementById('newNom').value.trim();
     const voiture = document.getElementById('newVoiture').value.trim();
