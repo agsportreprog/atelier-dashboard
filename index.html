@@ -19,6 +19,8 @@
     --done-dim: #3ecf8e22;
     --cours: #4a9eff;
     --cours-dim: #4a9eff22;
+    --courtesy: #a78bfa;
+    --courtesy-dim: #a78bfa22;
     --text: #f2f0ea;
     --text-dim: #9aa0ab;
     --mono: 'SF Mono', 'Consolas', monospace;
@@ -98,6 +100,15 @@
   .card.paused{opacity:.78;}
   .card.paused .time{background:#ffc94622;}
   .card.inprogress .time{background:var(--cours-dim);}
+  .card.has-courtesy{border-left:3px solid var(--courtesy);}
+  .courtesy-badge{
+    display:inline-block; background:var(--courtesy-dim); color:var(--courtesy);
+    padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700; margin-top:4px;
+  }
+  .modal .field select{
+    width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
+  }
   .card-top{display:flex; align-items:stretch;}
   .card-actions{display:flex; border-top:1px solid var(--line-solid);}
   .action-btn{
@@ -210,7 +221,15 @@
     .newevent-right{border-left:none; padding-left:0; border-top:1px solid var(--line-solid); padding-top:20px; margin-top:8px;}
   }
   .day-agenda-title{font-size:13px; font-weight:700; margin-bottom:12px; text-transform:capitalize; color:var(--text);}
-  #dayAgendaPanel .search-result{margin-bottom:8px;}
+  #dayAgendaPanel .search-result{margin-bottom:8px; padding:12px 14px;}
+  #dayAgendaPanel .search-result.multiday{padding:7px 12px; opacity:.75;}
+  #dayAgendaPanel .search-result.multiday .sr-title{
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; font-size:12px; font-weight:600;
+  }
+  #dayAgendaPanel .search-result.multiday .sr-date{font-size:10px; width:auto;}
+  .sr-courtesy{
+    display:block; font-size:11px; color:var(--courtesy); margin-top:3px; font-weight:600;
+  }
   .perf-actions{display:flex; gap:14px; margin-top:4px; flex-wrap:wrap;}
 
   .modal-search{max-width:560px;}
@@ -279,6 +298,8 @@ const PERF_HP_BEFORE_KEY = 'atelier_perf_hp_before';
 const PERF_HP_AFTER_KEY = 'atelier_perf_hp_after';
 const PERF_TORQUE_BEFORE_KEY = 'atelier_perf_torque_before';
 const PERF_TORQUE_AFTER_KEY = 'atelier_perf_torque_after';
+const COURTESY_CAR_KEY = 'atelier_courtesy_car';
+const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c3: 'C3 (diesel)' };
 
 let config = null;       // { workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled }
 let accessToken = null;
@@ -486,7 +507,8 @@ function mapEvent(ev){
     hpBefore: priv[PERF_HP_BEFORE_KEY] || '',
     hpAfter: priv[PERF_HP_AFTER_KEY] || '',
     torqueBefore: priv[PERF_TORQUE_BEFORE_KEY] || '',
-    torqueAfter: priv[PERF_TORQUE_AFTER_KEY] || ''
+    torqueAfter: priv[PERF_TORQUE_AFTER_KEY] || '',
+    courtesyCar: priv[COURTESY_CAR_KEY] || ''
   };
 }
 
@@ -756,7 +778,41 @@ function setComment(id, comment){
   patchPrivateProps(id, { [COMMENT_KEY]: comment });
 }
 
-async function createCalendarEvent({nom, voiture, presta, numero, commentaire, date, startTime, endTime}){
+function setCourtesyCar(id, value){
+  patchPrivateProps(id, { [COURTESY_CAR_KEY]: value });
+}
+
+function openCourtesyModal(id, current){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const optionsHtml = [`<option value="" ${!current ? 'selected' : ''}>Aucun</option>`]
+    .concat(Object.entries(COURTESY_CARS).map(([key, label]) =>
+      `<option value="${key}" ${current === key ? 'selected' : ''}>${label}</option>`
+    )).join('');
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Véhicule de courtoisie</h3>
+      <div class="field">
+        <label>Voiture prêtée</label>
+        <select id="courtesySelect">${optionsHtml}</select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelCourtesy">Annuler</button>
+        <button class="btn-save" id="saveCourtesy">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelCourtesy').onclick = () => overlay.remove();
+  document.getElementById('saveCourtesy').onclick = () => {
+    const val = document.getElementById('courtesySelect').value;
+    overlay.remove();
+    setCourtesyCar(id, val);
+  };
+}
+
+async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime}){
   const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
   const summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
@@ -775,8 +831,8 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, d
     return false;
   }
   const created = await res.json();
-  if(commentaire){
-    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire });
+  if(commentaire || courtesy){
+    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire || '', [COURTESY_CAR_KEY]: courtesy || '' });
   }
   return true;
 }
@@ -831,6 +887,13 @@ async function openNewEventModal(){
           <div class="field">
             <label>Commentaires</label>
             <textarea id="newComment" placeholder="optionnel"></textarea>
+          </div>
+          <div class="field">
+            <label>Véhicule de courtoisie prêté</label>
+            <select id="newCourtesy">
+              <option value="">Aucun</option>
+              ${Object.entries(COURTESY_CARS).map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}
+            </select>
           </div>
         </div>
         <div class="newevent-right">
@@ -908,11 +971,12 @@ async function openNewEventModal(){
       ${dayEvents.map(ev => {
         const parts = parseParts(ev.raw);
         const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
-        const timeLabel = ev.allDay ? 'Jour entier' : `${fmtTime(ev.start)} → ${fmtTime(ev.end)}`;
+        const timeLabel = ev.allDay ? (ev.isMultiDay ? 'Plsrs jours' : 'Jour entier') : `${fmtTime(ev.start)} → ${fmtTime(ev.end)}`;
+        const courtesyTag = ev.courtesyCar ? `<span class="sr-courtesy">🚗 ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</span>` : '';
         return `
-          <div class="search-result">
+          <div class="search-result ${ev.isMultiDay ? 'multiday' : ''}">
             <div class="sr-date">${timeLabel}</div>
-            <div class="sr-body"><div class="sr-title">${escapeHtml(label)}</div></div>
+            <div class="sr-body"><div class="sr-title">${escapeHtml(label)}</div>${courtesyTag}</div>
           </div>
         `;
       }).join('')}
@@ -939,13 +1003,17 @@ async function openNewEventModal(){
       allUpcomingEvents = (data.items || []).map(ev => {
         const startRaw = ev.start?.dateTime || ev.start?.date;
         const endRaw = ev.end?.dateTime || ev.end?.date;
+        const allDay = !ev.start?.dateTime;
+        const isMultiDay = allDay && endRaw && startRaw && (new Date(endRaw) - new Date(startRaw)) > 24 * 3600 * 1000;
         return {
           id: ev.id,
           start: startRaw,
           end: endRaw,
-          allDay: !ev.start?.dateTime,
+          allDay,
+          isMultiDay,
           raw: ev.summary || '',
-          dateStr: (startRaw || '').slice(0, 10)
+          dateStr: (startRaw || '').slice(0, 10),
+          courtesyCar: ev.extendedProperties?.private?.[COURTESY_CAR_KEY] || ''
         };
       });
       countsByDate = {};
@@ -965,6 +1033,7 @@ async function openNewEventModal(){
     const presta = document.getElementById('newPresta').value.trim();
     const numero = document.getElementById('newNumero').value.trim();
     const commentaire = document.getElementById('newComment').value.trim();
+    const courtesy = document.getElementById('newCourtesy').value;
     const date = document.getElementById('newDate').value;
     const startTime = document.getElementById('newStartTime').value;
     const endTime = document.getElementById('newEndTime').value;
@@ -975,7 +1044,7 @@ async function openNewEventModal(){
     const saveBtn = document.getElementById('saveNewEvent');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Création...';
-    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, date, startTime, endTime});
+    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime});
     if(ok){
       overlay.remove();
       fetchEvents();
@@ -1227,8 +1296,9 @@ function renderList(){
             ${hasPerf ? `<div class="comment-btn perf-print-btn" data-id="${ev.id}">🖨️ Imprimer PDF</div>` : ''}
           </div>
         `;
+        const courtesyHtml = ev.courtesyCar ? `<div class="courtesy-badge">🚗 Courtoisie : ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</div>` : '';
         return `
-          <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''} ${ev.inProgress ? 'inprogress' : ''}">
+          <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''} ${ev.inProgress ? 'inprogress' : ''} ${ev.courtesyCar ? 'has-courtesy' : ''}">
             <div class="card-top">
               <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
               <div class="body">
@@ -1238,6 +1308,10 @@ function renderList(){
                   ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
                 </div>
                 ${perfHtml}
+                ${courtesyHtml}
+                <div class="comment-btn courtesy-edit-btn" data-id="${ev.id}" data-current="${encodeURIComponent(ev.courtesyCar || '')}">
+                  ${ev.courtesyCar ? '🚗 Modifier le véhicule de courtoisie' : '🚗 Prêter un véhicule de courtoisie'}
+                </div>
               </div>
             </div>
             <div class="card-actions">
@@ -1354,6 +1428,9 @@ function renderList(){
       const ev = events.find(e => e.id === el.dataset.id);
       if(ev) printPerfReport(ev);
     };
+  });
+  document.querySelectorAll('.courtesy-edit-btn').forEach(el => {
+    el.onclick = () => openCourtesyModal(el.dataset.id, decodeURIComponent(el.dataset.current));
   });
 }
 
