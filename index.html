@@ -245,6 +245,10 @@ const PERF_BEFORE_KEY = 'atelier_perf_before';
 const PERF_AFTER_KEY = 'atelier_perf_after';
 const PERF060_BEFORE_KEY = 'atelier_perf060_before';
 const PERF060_AFTER_KEY = 'atelier_perf060_after';
+const PERF_HP_BEFORE_KEY = 'atelier_perf_hp_before';
+const PERF_HP_AFTER_KEY = 'atelier_perf_hp_after';
+const PERF_TORQUE_BEFORE_KEY = 'atelier_perf_torque_before';
+const PERF_TORQUE_AFTER_KEY = 'atelier_perf_torque_after';
 
 let config = null;       // { workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled }
 let accessToken = null;
@@ -448,7 +452,11 @@ function mapEvent(ev){
     perfBefore: priv[PERF_BEFORE_KEY] || '',
     perfAfter: priv[PERF_AFTER_KEY] || '',
     perf060Before: priv[PERF060_BEFORE_KEY] || '',
-    perf060After: priv[PERF060_AFTER_KEY] || ''
+    perf060After: priv[PERF060_AFTER_KEY] || '',
+    hpBefore: priv[PERF_HP_BEFORE_KEY] || '',
+    hpAfter: priv[PERF_HP_AFTER_KEY] || '',
+    torqueBefore: priv[PERF_TORQUE_BEFORE_KEY] || '',
+    torqueAfter: priv[PERF_TORQUE_AFTER_KEY] || ''
   };
 }
 
@@ -718,12 +726,16 @@ function setComment(id, comment){
   patchPrivateProps(id, { [COMMENT_KEY]: comment });
 }
 
-function setPerf(id, before, after, before060, after060){
+function setPerf(id, values){
   patchPrivateProps(id, {
-    [PERF_BEFORE_KEY]: before,
-    [PERF_AFTER_KEY]: after,
-    [PERF060_BEFORE_KEY]: before060,
-    [PERF060_AFTER_KEY]: after060
+    [PERF_BEFORE_KEY]: values.before,
+    [PERF_AFTER_KEY]: values.after,
+    [PERF060_BEFORE_KEY]: values.before060,
+    [PERF060_AFTER_KEY]: values.after060,
+    [PERF_HP_BEFORE_KEY]: values.hpBefore,
+    [PERF_HP_AFTER_KEY]: values.hpAfter,
+    [PERF_TORQUE_BEFORE_KEY]: values.torqueBefore,
+    [PERF_TORQUE_AFTER_KEY]: values.torqueAfter
   });
 }
 
@@ -739,12 +751,26 @@ function printPerfReport(ev){
     const an = parseFloat((a || '').replace(',', '.'));
     return (!isNaN(bn) && !isNaN(an)) ? `${(bn - an).toFixed(2)} s` : '—';
   };
+  const gainPlusOf = (b, a, unit) => {
+    const bn = parseFloat((b || '').replace(',', '.'));
+    const an = parseFloat((a || '').replace(',', '.'));
+    return (!isNaN(bn) && !isNaN(an)) ? `+${(an - bn).toFixed(0)} ${unit}` : '—';
+  };
   const dateStr = new Date().toLocaleDateString('fr-FR', {day:'numeric', month:'long', year:'numeric'});
 
   const rows060 = (before060 || after060) ? `
     <tr><td class="label">0-60 km/h d'origine</td><td>${escapeHtml(before060 || '—')}</td></tr>
     <tr><td class="label">0-60 km/h après reprogrammation</td><td>${escapeHtml(after060 || '—')}</td></tr>
     <tr><td class="label">Gain 0-60</td><td>${gainOf(before060, after060)}</td></tr>
+  ` : '';
+
+  const rowsPower = (ev.hpBefore || ev.hpAfter || ev.torqueBefore || ev.torqueAfter) ? `
+    <tr><td class="label">Puissance d'origine (approx.)</td><td>${escapeHtml(ev.hpBefore || '—')} ch</td></tr>
+    <tr><td class="label">Puissance après reprogrammation (approx.)</td><td>${escapeHtml(ev.hpAfter || '—')} ch</td></tr>
+    <tr><td class="label">Gain puissance</td><td>${gainPlusOf(ev.hpBefore, ev.hpAfter, 'ch')}</td></tr>
+    <tr><td class="label">Couple d'origine (approx.)</td><td>${escapeHtml(ev.torqueBefore || '—')} Nm</td></tr>
+    <tr><td class="label">Couple après reprogrammation (approx.)</td><td>${escapeHtml(ev.torqueAfter || '—')} Nm</td></tr>
+    <tr><td class="label">Gain couple</td><td>${gainPlusOf(ev.torqueBefore, ev.torqueAfter, 'Nm')}</td></tr>
   ` : '';
 
   const html = `<!DOCTYPE html>
@@ -773,8 +799,9 @@ function printPerfReport(ev){
     <tr><td class="label">0-100 km/h d'origine</td><td>${escapeHtml(before || '—')}</td></tr>
     <tr><td class="label">0-100 km/h après reprogrammation</td><td>${escapeHtml(after || '—')}</td></tr>
     <tr><td class="label">Gain 0-100</td><td>${gainOf(before, after)}</td></tr>
+    ${rowsPower}
   </table>
-  <div class="footer">Mesures effectuées à l'aide d'un récepteur GPS (Dragy ou équivalent). Résultats donnés à titre indicatif, pouvant varier selon les conditions (météo, revêtement, charge du véhicule).</div>
+  <div class="footer">Mesures effectuées à l'aide d'un récepteur GPS (Dragy ou équivalent). Valeurs de puissance et couple approximatives (estimation atelier, non certifiées banc de puissance). Résultats donnés à titre indicatif, pouvant varier selon les conditions (météo, revêtement, charge du véhicule).</div>
   <script>window.onload = () => window.print();<\/script>
 </body>
 </html>`;
@@ -788,27 +815,43 @@ function printPerfReport(ev){
   }
 }
 
-function openPerfModal(id, currentBefore, currentAfter, currentBefore060, currentAfter060){
+function openPerfModal(id, data){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal">
-      <h3>Temps 0-60 et 0-100 km/h</h3>
+      <h3>Performances (approximatif)</h3>
       <div class="field">
         <label>0-60 km/h d'origine</label>
-        <input id="perf060BeforeInput" placeholder="ex : 3.9s" value="${escapeHtml(currentBefore060 || '')}">
+        <input id="perf060BeforeInput" placeholder="ex : 3.9s" value="${escapeHtml(data.before060 || '')}">
       </div>
       <div class="field">
         <label>0-60 km/h après augmentation de puissance</label>
-        <input id="perf060AfterInput" placeholder="ex : 3.4s" value="${escapeHtml(currentAfter060 || '')}">
+        <input id="perf060AfterInput" placeholder="ex : 3.4s" value="${escapeHtml(data.after060 || '')}">
       </div>
       <div class="field">
         <label>0-100 km/h d'origine</label>
-        <input id="perfBeforeInput" placeholder="ex : 6.8s" value="${escapeHtml(currentBefore || '')}">
+        <input id="perfBeforeInput" placeholder="ex : 6.8s" value="${escapeHtml(data.before || '')}">
       </div>
       <div class="field">
         <label>0-100 km/h après augmentation de puissance</label>
-        <input id="perfAfterInput" placeholder="ex : 5.9s" value="${escapeHtml(currentAfter || '')}">
+        <input id="perfAfterInput" placeholder="ex : 5.9s" value="${escapeHtml(data.after || '')}">
+      </div>
+      <div class="field">
+        <label>Puissance d'origine (ch, approx.)</label>
+        <input id="hpBeforeInput" placeholder="ex : 150" value="${escapeHtml(data.hpBefore || '')}">
+      </div>
+      <div class="field">
+        <label>Puissance après augmentation (ch, approx.)</label>
+        <input id="hpAfterInput" placeholder="ex : 175" value="${escapeHtml(data.hpAfter || '')}">
+      </div>
+      <div class="field">
+        <label>Couple d'origine (Nm, approx.)</label>
+        <input id="torqueBeforeInput" placeholder="ex : 320" value="${escapeHtml(data.torqueBefore || '')}">
+      </div>
+      <div class="field">
+        <label>Couple après augmentation (Nm, approx.)</label>
+        <input id="torqueAfterInput" placeholder="ex : 380" value="${escapeHtml(data.torqueAfter || '')}">
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="cancelPerf">Annuler</button>
@@ -820,12 +863,18 @@ function openPerfModal(id, currentBefore, currentAfter, currentBefore060, curren
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
   document.getElementById('cancelPerf').onclick = () => overlay.remove();
   document.getElementById('savePerf').onclick = () => {
-    const before = document.getElementById('perfBeforeInput').value.trim();
-    const after = document.getElementById('perfAfterInput').value.trim();
-    const before060 = document.getElementById('perf060BeforeInput').value.trim();
-    const after060 = document.getElementById('perf060AfterInput').value.trim();
+    const values = {
+      before: document.getElementById('perfBeforeInput').value.trim(),
+      after: document.getElementById('perfAfterInput').value.trim(),
+      before060: document.getElementById('perf060BeforeInput').value.trim(),
+      after060: document.getElementById('perf060AfterInput').value.trim(),
+      hpBefore: document.getElementById('hpBeforeInput').value.trim(),
+      hpAfter: document.getElementById('hpAfterInput').value.trim(),
+      torqueBefore: document.getElementById('torqueBeforeInput').value.trim(),
+      torqueAfter: document.getElementById('torqueAfterInput').value.trim()
+    };
     overlay.remove();
-    setPerf(id, before, after, before060, after060);
+    setPerf(id, values);
   };
 }
 
@@ -899,17 +948,21 @@ function renderList(){
         const commentHtml = ev.comment
           ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>`
           : '';
-        const hasPerf = ev.perfBefore || ev.perfAfter || ev.perf060Before || ev.perf060After;
+        const hasPerf = ev.perfBefore || ev.perfAfter || ev.perf060Before || ev.perf060After || ev.hpBefore || ev.hpAfter || ev.torqueBefore || ev.torqueAfter;
         const perfLines = [];
         if(ev.perf060Before || ev.perf060After) perfLines.push(`0-60 : ${escapeHtml(ev.perf060Before || '—')} → ${escapeHtml(ev.perf060After || '—')}`);
         if(ev.perfBefore || ev.perfAfter) perfLines.push(`0-100 : ${escapeHtml(ev.perfBefore || '—')} → ${escapeHtml(ev.perfAfter || '—')}`);
+        if(ev.hpBefore || ev.hpAfter) perfLines.push(`🐎 ${escapeHtml(ev.hpBefore || '—')} → ${escapeHtml(ev.hpAfter || '—')} ch`);
+        if(ev.torqueBefore || ev.torqueAfter) perfLines.push(`Couple ${escapeHtml(ev.torqueBefore || '—')} → ${escapeHtml(ev.torqueAfter || '—')} Nm`);
+        const perfData = encodeURIComponent(JSON.stringify({
+          before: ev.perfBefore, after: ev.perfAfter, before060: ev.perf060Before, after060: ev.perf060After,
+          hpBefore: ev.hpBefore, hpAfter: ev.hpAfter, torqueBefore: ev.torqueBefore, torqueAfter: ev.torqueAfter
+        }));
         const perfHtml = `
           ${hasPerf ? `<div class="perf-summary">⏱ ${perfLines.join(' · ')}</div>` : ''}
           <div class="perf-actions">
-            <div class="comment-btn perf-edit-btn" data-id="${ev.id}"
-                 data-before="${encodeURIComponent(ev.perfBefore || '')}" data-after="${encodeURIComponent(ev.perfAfter || '')}"
-                 data-before060="${encodeURIComponent(ev.perf060Before || '')}" data-after060="${encodeURIComponent(ev.perf060After || '')}">
-              ${hasPerf ? '⏱ Modifier les temps 0-60 / 0-100' : '⏱ Ajouter les temps 0-60 / 0-100'}
+            <div class="comment-btn perf-edit-btn" data-id="${ev.id}" data-perf="${perfData}">
+              ${hasPerf ? '⏱ Modifier les performances' : '⏱ Ajouter les performances'}
             </div>
             ${hasPerf ? `<div class="comment-btn perf-print-btn" data-id="${ev.id}">🖨️ Imprimer PDF</div>` : ''}
           </div>
@@ -1032,11 +1085,7 @@ function renderList(){
     };
   });
   document.querySelectorAll('.perf-edit-btn').forEach(el => {
-    el.onclick = () => openPerfModal(
-      el.dataset.id,
-      decodeURIComponent(el.dataset.before), decodeURIComponent(el.dataset.after),
-      decodeURIComponent(el.dataset.before060), decodeURIComponent(el.dataset.after060)
-    );
+    el.onclick = () => openPerfModal(el.dataset.id, JSON.parse(decodeURIComponent(el.dataset.perf)));
   });
   document.querySelectorAll('.perf-print-btn').forEach(el => {
     el.onclick = () => {
