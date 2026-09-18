@@ -769,10 +769,11 @@ async function fetchEvents(){
   renderList();
 }
 
-async function patchPrivateProps(id, props, colorId){
+async function patchPrivateProps(id, props, colorId, summary){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
   const body = { extendedProperties: { private: props } };
   if(colorId !== undefined) body.colorId = colorId;
+  if(summary !== undefined) body.summary = summary;
   await authFetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -791,8 +792,11 @@ function setComment(id, comment){
 }
 
 function setCourtesyCar(id, value){
+  const ev = events.find(e => e.id === id);
+  const baseTitle = (ev ? ev.raw : '').replace(/ 🚗 .+$/, ''); // retire un ancien marqueur de courtoisie s'il existe
+  const newTitle = value ? `${baseTitle} 🚗 ${COURTESY_CARS[value]}` : baseTitle;
   // colorId "6" = Tangerine (orange) dans Google Agenda ; null = remet la couleur par défaut
-  patchPrivateProps(id, { [COURTESY_CAR_KEY]: value }, value ? '6' : null);
+  patchPrivateProps(id, { [COURTESY_CAR_KEY]: value }, value ? '6' : null, newTitle);
 }
 
 function openCourtesyModal(id, current){
@@ -827,7 +831,8 @@ function openCourtesyModal(id, current){
 
 async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate}){
   const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
-  const summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
+  let summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
+  if(courtesy) summary += ` 🚗 ${COURTESY_CARS[courtesy]}`;
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
 
   let body;
@@ -1314,7 +1319,8 @@ function openPerfModal(id, data){
 }
 
 function parseParts(raw){
-  const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+  const cleaned = (raw || '').replace(/ 🚗 .+$/, '');
+  const parts = cleaned.split('|').map(s => s.trim()).filter(Boolean);
   if(parts.length >= 2){
     return { model: parts[0], presta: parts[1] || '', phone: parts[2] || '' };
   }
