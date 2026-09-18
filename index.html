@@ -193,27 +193,33 @@
     background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
   }
   .perf-summary{font-size:12px; color:var(--text-dim); margin-top:6px; font-family:var(--mono);}
-  .mini-cal{background:var(--panel-2); border:1px solid var(--line-solid); border-radius:10px; padding:10px; margin-top:4px;}
-  .mc-loading{text-transform:none; letter-spacing:0; font-size:11px; color:var(--text-dim); font-weight:400;}
-  .mc-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
-  .mc-title{font-size:13px; font-weight:700; text-transform:capitalize; color:var(--text);}
-  .mc-nav{background:var(--panel); border:1px solid var(--line-solid); color:var(--text); width:26px; height:26px; border-radius:6px; cursor:pointer; font-size:14px; line-height:1;}
-  .mc-weekdays{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:10px; color:var(--text-dim); margin-bottom:4px;}
-  .mc-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:3px;}
+  .mini-cal{background:var(--panel-2); border:1px solid var(--line-solid); border-radius:12px; padding:18px; margin-top:4px;}
+  .mc-loading{display:block; text-transform:none; letter-spacing:0; font-size:12px; color:var(--text-dim); font-weight:400; margin-bottom:10px;}
+  .mc-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .mc-title{font-size:17px; font-weight:700; text-transform:capitalize; color:var(--text);}
+  .mc-nav{background:var(--panel); border:1px solid var(--line-solid); color:var(--text); width:36px; height:36px; border-radius:8px; cursor:pointer; font-size:18px; line-height:1;}
+  .mc-weekdays{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:12px; color:var(--text-dim); margin-bottom:8px; font-weight:600;}
+  .mc-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:6px;}
   .mc-cell{
     position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center;
-    border-radius:6px; font-size:12px; cursor:pointer; background:var(--panel); color:var(--text);
+    border-radius:8px; font-size:16px; cursor:pointer; background:var(--panel); color:var(--text);
   }
-  .mc-cell.mc-empty{visibility:hidden; cursor:default;}
-  .mc-cell.mc-past{opacity:.3; cursor:default;}
+  .mc-cell.mc-empty, .mc-cell.mc-past{visibility:hidden; cursor:default;}
   .mc-cell.mc-busy{background:var(--accent-dim); color:var(--accent); font-weight:600;}
   .mc-cell.mc-selected{background:var(--accent); color:#1a0d05; font-weight:700;}
   .mc-count{
-    position:absolute; bottom:1px; right:1px; font-size:8px; background:var(--accent); color:#1a0d05;
-    border-radius:50%; width:13px; height:13px; display:flex; align-items:center; justify-content:center; font-weight:700;
+    position:absolute; bottom:3px; right:3px; font-size:11px; background:var(--accent); color:#1a0d05;
+    border-radius:50%; width:19px; height:19px; display:flex; align-items:center; justify-content:center; font-weight:700;
   }
   .mc-cell.mc-selected .mc-count{background:#1a0d05; color:var(--accent);}
-  .modal-newevent{max-width:1400px; width:95vw; max-height:94vh; overflow-y:auto;}
+  .modal-newevent{max-width:none; width:98vw; max-height:96vh; overflow-y:auto;}
+  .modal-newevent .newevent-left{flex:0 0 360px;}
+  .modal-newevent .newevent-right{flex:1 1 600px;}
+  .month-summary{
+    display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;
+  }
+  .month-summary .pill{font-family:var(--mono); font-size:12px; padding:6px 12px; border-radius:20px; border:1px solid var(--line-solid); color:var(--text-dim);}
+  .month-summary .pill b{color:var(--text); font-size:14px;}
   .newevent-columns{display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start;}
   .newevent-left{flex:1 1 340px; min-width:280px;}
   .newevent-right{flex:1 1 340px; min-width:280px; border-left:1px solid var(--line-solid); padding-left:28px;}
@@ -889,9 +895,8 @@ async function openNewEventModal(){
           </div>
 
           <div class="field required">
-            <label>Date <span class="mc-loading" id="mcLoading">(chargement du planning...)</span></label>
-            <div class="mini-cal" id="miniCal"></div>
-            <input id="newDate" type="date" value="${today}" style="margin-top:8px;">
+            <label>Date choisie</label>
+            <input id="newDate" type="date" value="${today}">
           </div>
 
           <label class="checkbox-row" style="margin-top:0; margin-bottom:14px;">
@@ -928,7 +933,10 @@ async function openNewEventModal(){
           </div>
         </div>
         <div class="newevent-right">
-          <div id="dayAgendaPanel"><div class="search-hint">Chargement du planning...</div></div>
+          <span class="mc-loading" id="mcLoading">Chargement du planning du mois...</span>
+          <div class="month-summary" id="monthSummary"></div>
+          <div class="mini-cal" id="miniCal"></div>
+          <div id="dayAgendaPanel" style="margin-top:20px;"><div class="search-hint">Chargement du planning...</div></div>
         </div>
       </div>
       <div class="modal-actions">
@@ -940,6 +948,32 @@ async function openNewEventModal(){
   document.body.appendChild(overlay);
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
   document.getElementById('cancelNewEvent').onclick = () => overlay.remove();
+
+  function renderMonthSummary(){
+    const base = new Date();
+    const viewDate = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const todayMidnight = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    let totalRdv = 0;
+    let freeDays = 0;
+    for(let d = 1; d <= daysInMonth; d++){
+      const dateObj = new Date(year, month, d);
+      if(dateObj < todayMidnight) continue; // on ignore les jours déjà passés
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const count = countsByDate[dateStr] || 0;
+      totalRdv += count;
+      if(count === 0) freeDays++;
+    }
+    const summaryEl = document.getElementById('monthSummary');
+    if(summaryEl){
+      summaryEl.innerHTML = `
+        <div class="pill"><b>${totalRdv}</b> véhicule${totalRdv > 1 ? 's' : ''} restant${totalRdv > 1 ? 's' : ''} ce mois</div>
+        <div class="pill"><b>${freeDays}</b> jour${freeDays > 1 ? 's' : ''} encore libre${freeDays > 1 ? 's' : ''}</div>
+      `;
+    }
+  }
 
   function renderMiniCal(){
     const base = new Date();
@@ -973,8 +1007,8 @@ async function openNewEventModal(){
       <div class="mc-weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="mc-grid">${cells}</div>
     `;
-    document.getElementById('mcPrev').onclick = () => { monthOffset--; renderMiniCal(); };
-    document.getElementById('mcNext').onclick = () => { monthOffset++; renderMiniCal(); };
+    document.getElementById('mcPrev').onclick = () => { monthOffset--; renderMiniCal(); renderMonthSummary(); };
+    document.getElementById('mcNext').onclick = () => { monthOffset++; renderMiniCal(); renderMonthSummary(); };
     document.querySelectorAll('.mc-cell:not(.mc-empty):not(.mc-past)').forEach(el => {
       el.onclick = () => {
         selectedDate = el.dataset.date;
@@ -1084,6 +1118,7 @@ async function openNewEventModal(){
   const loadingEl = document.getElementById('mcLoading');
   if(loadingEl) loadingEl.remove();
   renderMiniCal();
+  renderMonthSummary();
   renderDayAgenda();
 
   document.getElementById('saveNewEvent').onclick = async () => {
