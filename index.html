@@ -198,13 +198,17 @@
   .mc-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
   .mc-title{font-size:17px; font-weight:700; text-transform:capitalize; color:var(--text);}
   .mc-nav{background:var(--panel); border:1px solid var(--line-solid); color:var(--text); width:36px; height:36px; border-radius:8px; cursor:pointer; font-size:18px; line-height:1;}
+  .mc-nav:disabled{opacity:.3; cursor:default;}
   .mc-weekdays{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:12px; color:var(--text-dim); margin-bottom:8px; font-weight:600;}
   .mc-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:6px;}
   .mc-cell{
     position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center;
     border-radius:8px; font-size:16px; cursor:pointer; background:var(--panel); color:var(--text);
   }
-  .mc-cell.mc-empty, .mc-cell.mc-past{visibility:hidden; cursor:default;}
+  .mc-day{display:flex; flex-direction:column; align-items:center; line-height:1.1;}
+  .mc-day small{font-size:9px; text-transform:uppercase; color:var(--text-dim); font-weight:600; margin-top:1px;}
+  .mc-cell.mc-selected .mc-day small{color:#1a0d05aa;}
+  .mc-cell.mc-empty{visibility:hidden; cursor:default;}
   .mc-cell.mc-busy{background:var(--accent-dim); color:var(--accent); font-weight:600;}
   .mc-cell.mc-selected{background:var(--accent); color:#1a0d05; font-weight:700;}
   .mc-count{
@@ -867,7 +871,7 @@ async function openNewEventModal(){
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
 
-  let monthOffset = 0;
+  let dayOffset = 0;
   let selectedDate = today;
   let countsByDate = {};
   let allUpcomingEvents = [];
@@ -949,67 +953,65 @@ async function openNewEventModal(){
   overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
   document.getElementById('cancelNewEvent').onclick = () => overlay.remove();
 
-  function renderMonthSummary(){
+  function windowDates(){
     const base = new Date();
-    const viewDate = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
-    const year = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const todayMidnight = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    const start = new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayOffset * 30);
+    const days = [];
+    for(let i = 0; i < 30; i++){
+      days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+    }
+    return days;
+  }
+
+  function renderMonthSummary(){
+    const days = windowDates();
     let totalRdv = 0;
     let freeDays = 0;
-    for(let d = 1; d <= daysInMonth; d++){
-      const dateObj = new Date(year, month, d);
-      if(dateObj < todayMidnight) continue; // on ignore les jours déjà passés
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    days.forEach(dateObj => {
+      const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
       const count = countsByDate[dateStr] || 0;
       totalRdv += count;
       if(count === 0) freeDays++;
-    }
+    });
     const summaryEl = document.getElementById('monthSummary');
     if(summaryEl){
       summaryEl.innerHTML = `
-        <div class="pill"><b>${totalRdv}</b> véhicule${totalRdv > 1 ? 's' : ''} restant${totalRdv > 1 ? 's' : ''} ce mois</div>
+        <div class="pill"><b>${totalRdv}</b> véhicule${totalRdv > 1 ? 's' : ''} sur ces 30 jours</div>
         <div class="pill"><b>${freeDays}</b> jour${freeDays > 1 ? 's' : ''} encore libre${freeDays > 1 ? 's' : ''}</div>
       `;
     }
   }
 
   function renderMiniCal(){
-    const base = new Date();
-    const viewDate = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
-    const year = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const startWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // lundi = 0
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const monthLabel = viewDate.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
-    const todayMidnight = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    const days = windowDates();
+    const startWeekday = (days[0].getDay() + 6) % 7; // lundi = 0
+    const rangeLabel = `${days[0].toLocaleDateString('fr-FR', {day:'numeric', month:'short'})} → ${days[29].toLocaleDateString('fr-FR', {day:'numeric', month:'short'})}`;
 
     let cells = '';
     for(let i = 0; i < startWeekday; i++) cells += `<div class="mc-cell mc-empty"></div>`;
-    for(let d = 1; d <= daysInMonth; d++){
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const dateObj = new Date(year, month, d);
+    days.forEach(dateObj => {
+      const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
       const count = countsByDate[dateStr] || 0;
-      const isPast = dateObj < todayMidnight;
       const isSelected = dateStr === selectedDate;
-      cells += `<div class="mc-cell ${isPast ? 'mc-past' : ''} ${isSelected ? 'mc-selected' : ''} ${(count > 0 && !isPast) ? 'mc-busy' : ''}" data-date="${dateStr}">
-        <span class="mc-day">${d}</span>${(count > 0 && !isPast) ? `<span class="mc-count">${count}</span>` : ''}
+      const dayNum = dateObj.getDate();
+      const monthShort = dateObj.toLocaleDateString('fr-FR', {month:'short'});
+      cells += `<div class="mc-cell ${isSelected ? 'mc-selected' : ''} ${count > 0 ? 'mc-busy' : ''}" data-date="${dateStr}">
+        <span class="mc-day">${dayNum}<small>${monthShort}</small></span>${count > 0 ? `<span class="mc-count">${count}</span>` : ''}
       </div>`;
-    }
+    });
 
     document.getElementById('miniCal').innerHTML = `
       <div class="mc-header">
-        <button type="button" class="mc-nav" id="mcPrev">‹</button>
-        <span class="mc-title">${monthLabel}</span>
+        <button type="button" class="mc-nav" id="mcPrev" ${dayOffset <= 0 ? 'disabled' : ''}>‹</button>
+        <span class="mc-title">${rangeLabel}</span>
         <button type="button" class="mc-nav" id="mcNext">›</button>
       </div>
       <div class="mc-weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
       <div class="mc-grid">${cells}</div>
     `;
-    document.getElementById('mcPrev').onclick = () => { monthOffset--; renderMiniCal(); renderMonthSummary(); };
-    document.getElementById('mcNext').onclick = () => { monthOffset++; renderMiniCal(); renderMonthSummary(); };
-    document.querySelectorAll('.mc-cell:not(.mc-empty):not(.mc-past)').forEach(el => {
+    document.getElementById('mcPrev').onclick = () => { if(dayOffset > 0){ dayOffset--; renderMiniCal(); renderMonthSummary(); } };
+    document.getElementById('mcNext').onclick = () => { dayOffset++; renderMiniCal(); renderMonthSummary(); };
+    document.querySelectorAll('.mc-cell:not(.mc-empty)').forEach(el => {
       el.onclick = () => {
         selectedDate = el.dataset.date;
         document.getElementById('newDate').value = selectedDate;
