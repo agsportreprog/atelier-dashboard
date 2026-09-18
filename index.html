@@ -213,7 +213,7 @@
     border-radius:50%; width:13px; height:13px; display:flex; align-items:center; justify-content:center; font-weight:700;
   }
   .mc-cell.mc-selected .mc-count{background:#1a0d05; color:var(--accent);}
-  .modal-newevent{max-width:960px; max-height:90vh; overflow-y:auto;}
+  .modal-newevent{max-width:1400px; width:95vw; max-height:94vh; overflow-y:auto;}
   .newevent-columns{display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start;}
   .newevent-left{flex:1 1 340px; min-width:280px;}
   .newevent-right{flex:1 1 340px; min-width:280px; border-left:1px solid var(--line-solid); padding-left:28px;}
@@ -759,12 +759,14 @@ async function fetchEvents(){
   renderList();
 }
 
-async function patchPrivateProps(id, props){
+async function patchPrivateProps(id, props, colorId){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
+  const body = { extendedProperties: { private: props } };
+  if(colorId !== undefined) body.colorId = colorId;
   await authFetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ extendedProperties: { private: props } })
+    body: JSON.stringify(body)
   });
   fetchEvents();
 }
@@ -779,7 +781,8 @@ function setComment(id, comment){
 }
 
 function setCourtesyCar(id, value){
-  patchPrivateProps(id, { [COURTESY_CAR_KEY]: value });
+  // colorId "6" = Tangerine (orange) dans Google Agenda ; null = remet la couleur par défaut
+  patchPrivateProps(id, { [COURTESY_CAR_KEY]: value }, value ? '6' : null);
 }
 
 function openCourtesyModal(id, current){
@@ -812,15 +815,30 @@ function openCourtesyModal(id, current){
   };
 }
 
-async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime}){
+async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate}){
   const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
   const summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
-  const body = {
-    summary,
-    start: { dateTime: `${date}T${startTime}:00`, timeZone: 'Europe/Paris' },
-    end: { dateTime: `${date}T${endTime}:00`, timeZone: 'Europe/Paris' }
-  };
+
+  let body;
+  if(isMultiDay){
+    // Google Agenda attend une date de fin exclusive : on ajoute 1 jour au dernier jour choisi
+    const endExclusive = new Date(endDate + 'T00:00:00');
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    const endExclusiveStr = `${endExclusive.getFullYear()}-${String(endExclusive.getMonth()+1).padStart(2,'0')}-${String(endExclusive.getDate()).padStart(2,'0')}`;
+    body = {
+      summary,
+      start: { date: date },
+      end: { date: endExclusiveStr }
+    };
+  } else {
+    body = {
+      summary,
+      start: { dateTime: `${date}T${startTime}:00`, timeZone: 'Europe/Paris' },
+      end: { dateTime: `${date}T${endTime}:00`, timeZone: 'Europe/Paris' }
+    };
+  }
+
   const res = await authFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -832,7 +850,7 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, c
   }
   const created = await res.json();
   if(commentaire || courtesy){
-    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire || '', [COURTESY_CAR_KEY]: courtesy || '' });
+    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire || '', [COURTESY_CAR_KEY]: courtesy || '' }, courtesy ? '6' : undefined);
   }
   return true;
 }
@@ -876,14 +894,27 @@ async function openNewEventModal(){
             <input id="newDate" type="date" value="${today}" style="margin-top:8px;">
           </div>
 
-          <div class="field required">
-            <label>Heure de début</label>
-            <input id="newStartTime" type="time" value="09:00">
+          <label class="checkbox-row" style="margin-top:0; margin-bottom:14px;">
+            <input type="checkbox" id="newMultiDay"> Garder le véhicule plusieurs jours
+          </label>
+
+          <div id="singleDayFields">
+            <div class="field required">
+              <label>Heure de début</label>
+              <input id="newStartTime" type="time" value="09:00">
+            </div>
+            <div class="field required">
+              <label>Heure de fin</label>
+              <input id="newEndTime" type="time" value="10:00">
+            </div>
           </div>
-          <div class="field required">
-            <label>Heure de fin</label>
-            <input id="newEndTime" type="time" value="10:00">
+          <div id="multiDayFields" style="display:none;">
+            <div class="field required">
+              <label>Jusqu'au (dernier jour inclus)</label>
+              <input id="newEndDate" type="date" value="${today}">
+            </div>
           </div>
+
           <div class="field">
             <label>Commentaires</label>
             <textarea id="newComment" placeholder="optionnel"></textarea>
@@ -957,8 +988,16 @@ async function openNewEventModal(){
   function renderDayAgenda(){
     const panel = document.getElementById('dayAgendaPanel');
     if(!panel) return;
+    const selD = new Date(selectedDate + 'T00:00:00');
     const dayEvents = allUpcomingEvents
-      .filter(ev => ev.dateStr === selectedDate)
+      .filter(ev => {
+        if(ev.isMultiDay){
+          const startD = new Date(ev.start + 'T00:00:00');
+          const endD = new Date(ev.end); // borne exclusive
+          return selD >= startD && selD < endD;
+        }
+        return ev.dateStr === selectedDate;
+      })
       .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
     const dateLabel = new Date(selectedDate + 'T00:00:00').toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
 
@@ -987,6 +1026,16 @@ async function openNewEventModal(){
     selectedDate = e.target.value;
     renderMiniCal();
     renderDayAgenda();
+    const endDateInput = document.getElementById('newEndDate');
+    if(endDateInput){
+      endDateInput.min = e.target.value;
+      if(endDateInput.value < e.target.value) endDateInput.value = e.target.value;
+    }
+  });
+
+  document.getElementById('newMultiDay').addEventListener('change', (e) => {
+    document.getElementById('singleDayFields').style.display = e.target.checked ? 'none' : '';
+    document.getElementById('multiDayFields').style.display = e.target.checked ? '' : 'none';
   });
 
   renderMiniCal();
@@ -1018,7 +1067,17 @@ async function openNewEventModal(){
       });
       countsByDate = {};
       allUpcomingEvents.forEach(ev => {
-        countsByDate[ev.dateStr] = (countsByDate[ev.dateStr] || 0) + 1;
+        if(ev.isMultiDay){
+          let d = new Date(ev.start + 'T00:00:00');
+          const endD = new Date(ev.end);
+          while(d < endD){
+            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            countsByDate[key] = (countsByDate[key] || 0) + 1;
+            d.setDate(d.getDate() + 1);
+          }
+        } else {
+          countsByDate[ev.dateStr] = (countsByDate[ev.dateStr] || 0) + 1;
+        }
       });
     }
   }catch(e){}
@@ -1035,16 +1094,26 @@ async function openNewEventModal(){
     const commentaire = document.getElementById('newComment').value.trim();
     const courtesy = document.getElementById('newCourtesy').value;
     const date = document.getElementById('newDate').value;
+    const isMultiDay = document.getElementById('newMultiDay').checked;
     const startTime = document.getElementById('newStartTime').value;
     const endTime = document.getElementById('newEndTime').value;
-    if(!nom || !voiture || !date || !startTime || !endTime){
-      alert('Renseigne au moins le nom, la voiture, la date et les horaires.');
+    const endDate = document.getElementById('newEndDate').value;
+    if(!nom || !voiture || !date){
+      alert('Renseigne au moins le nom, la voiture et la date.');
+      return;
+    }
+    if(isMultiDay && !endDate){
+      alert('Renseigne le dernier jour de garde du véhicule.');
+      return;
+    }
+    if(!isMultiDay && (!startTime || !endTime)){
+      alert('Renseigne les horaires de début et de fin.');
       return;
     }
     const saveBtn = document.getElementById('saveNewEvent');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Création...';
-    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime});
+    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate});
     if(ok){
       overlay.remove();
       fetchEvents();
