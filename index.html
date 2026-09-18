@@ -1014,10 +1014,13 @@ async function executeTool(toolName, input){
 }
 
 async function callAssistant(){
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  const todayISO = now.toISOString().slice(0, 10);
   const body = {
     model: "claude-sonnet-5",
     max_tokens: 1024,
-    system: "Tu es l'assistant de prise de rendez-vous de l'atelier AG Sport Reprog (reprogrammation moteur). Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Réponds en français, de façon naturelle et concise.",
+    system: `Tu es l'assistant de prise de rendez-vous de l'atelier AG Sport Reprog (reprogrammation moteur). Nous sommes aujourd'hui le ${todayStr} (${todayISO} au format AAAA-MM-JJ) — utilise toujours cette date comme référence pour comprendre les demandes relatives ("demain", "la semaine prochaine", "vendredi prochain", etc.), ne te base jamais sur une autre date que celle-ci. Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Réponds en français, de façon naturelle et concise.`,
     messages: chatMessages,
     tools: BOOKING_TOOLS
   };
