@@ -323,9 +323,9 @@ const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c
 let chatMessages = [];
 
 const PRESTATIONS_CATALOG = `
-- Suppression vanne EGR : 180€ TTC, 30 min de travail actif, occupe une demi-journée de planning, jusqu'à 3 en simultané par demi-journée
-- Suppression FAP : 180€ TTC, ~30 min de travail actif, occupe une demi-journée, jusqu'à 3 en simultané par demi-journée
-- Suppression AdBlue : 350€ TTC, ~30 min de travail actif, occupe une demi-journée, jusqu'à 3 en simultané par demi-journée
+- Mise à jour de la vanne EGR : 180€ TTC, 30 min de travail actif, occupe une demi-journée de planning, jusqu'à 3 en simultané par demi-journée
+- Mise à jour du FAP : 180€ TTC, ~30 min de travail actif, occupe une demi-journée, jusqu'à 3 en simultané par demi-journée
+- Mise à jour AdBlue : 350€ TTC, ~30 min de travail actif, occupe une demi-journée, jusqu'à 3 en simultané par demi-journée
 - Reprogrammation puissance, véhicule jusqu'à 2014 : 450€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
 - Reprogrammation puissance, véhicule 2015 à 2019 : 500€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
 - Reprogrammation puissance, véhicule 2020 à 2022 : 550€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
@@ -1061,6 +1061,8 @@ CATALOGUE DES PRESTATIONS (prix, temps de travail actif, occupation du planning,
 ${PRESTATIONS_CATALOG}
 
 IMPORTANT : le "temps de travail actif" indiqué ci-dessus (ex : "30 min", "1h") est une donnée strictement interne, réservée à ton propre calcul de capacité — ne la communique JAMAIS au client, même reformulée. Face au client, exprime uniquement la durée en "demi-journée" ou "journée complète" (reprends l'information "occupe..." du catalogue), jamais en minutes ou en heures précises.
+
+VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'AdBlue, même si le client l'emploie lui-même — toujours dire "mise à jour" (ex : "mise à jour de la vanne EGR", "mise à jour du FAP", "mise à jour AdBlue"), y compris dans les messages de confirmation et dans les rendez-vous créés.
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
