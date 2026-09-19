@@ -342,7 +342,7 @@ const PRESTATIONS_CATALOG = `
 const BOOKING_TOOLS = [
   {
     name: "check_availability",
-    description: "Vérifie les rendez-vous déjà pris sur Google Agenda pour une plage de dates, afin de repérer un créneau libre.",
+    description: "Renvoie, pour chaque jour de la plage demandée, le nombre de rendez-vous déjà pris et le chiffre d'affaires déjà engagé (TTC et HT estimés) — jamais les noms de clients, numéros ou détails des rendez-vous, qui restent confidentiels.",
     input_schema: {
       type: "object",
       properties: {
@@ -1015,6 +1015,24 @@ function addChatInfo(text){
   return bubble;
 }
 
+// Estimation du prix (TTC) d'une prestation à partir de mots-clés dans le titre — fait ici en code,
+// jamais par l'assistant, pour ne jamais avoir à lui transmettre le titre brut (qui contient nom/téléphone/détails)
+const REVENUE_KEYWORDS = [
+  { keywords: ['egr'], priceTTC: 180 },
+  { keywords: ['fap'], priceTTC: 180 },
+  { keywords: ['adblue'], priceTTC: 350 },
+  { keywords: ['flexfuel', 'ethanol', 'éthanol', 'e85'], priceTTC: 690 },
+  { keywords: ['banc'], priceTTC: 120 },
+  { keywords: ['puissance', 'reprog'], priceTTC: 500 }
+];
+function estimateRevenueTTC(title){
+  const t = (title || '').toLowerCase();
+  for(const entry of REVENUE_KEYWORDS){
+    if(entry.keywords.some(k => t.includes(k))) return entry.priceTTC;
+  }
+  return 0;
+}
+
 async function executeTool(toolName, input){
   if(toolName === 'check_availability'){
     try{
@@ -1024,12 +1042,24 @@ async function executeTool(toolName, input){
       const res = await authFetch(url);
       if(!res.ok) return { error: "Impossible de consulter l'agenda." };
       const data = await res.json();
-      const rendez_vous_existants = (data.items || []).map(ev => ({
-        titre: ev.summary || '',
-        debut: ev.start?.dateTime || ev.start?.date,
-        fin: ev.end?.dateTime || ev.end?.date
-      }));
-      return { rendez_vous_existants };
+
+      const parJour = {};
+      (data.items || []).forEach(ev => {
+        const startRaw = ev.start?.dateTime || ev.start?.date;
+        const dateKey = (startRaw || '').slice(0, 10);
+        if(!dateKey) return;
+        if(!parJour[dateKey]) parJour[dateKey] = { date: dateKey, nombre_rdv: 0, chiffre_affaires_ttc_estime: 0 };
+        parJour[dateKey].nombre_rdv += 1;
+        parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
+      });
+      const jours = Object.values(parJour).map(j => ({
+        date: j.date,
+        nombre_rdv: j.nombre_rdv,
+        chiffre_affaires_ttc_estime: j.chiffre_affaires_ttc_estime,
+        chiffre_affaires_ht_estime: Math.round(j.chiffre_affaires_ttc_estime / 1.2)
+      })).sort((a, b) => a.date.localeCompare(b.date));
+
+      return { jours }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici
     }catch(e){
       return { error: "Erreur lors de la consultation de l'agenda." };
     }
@@ -1066,9 +1096,9 @@ VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'Ad
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour (HT = TTC ÷ 1,2). Quand tu consultes l'agenda via check_availability, estime le chiffre d'affaires déjà engagé ce jour-là en rapprochant les titres des rendez-vous existants du catalogue ci-dessus. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant. Si l'utilisateur insiste pour un créneau plus rapide que ce que tu peux proposer dans ces conditions, dis-lui de nous appeler directement au 07 69 37 70 92 plutôt que de forcer un rendez-vous.
+OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour, le nombre de rendez-vous et le chiffre d'affaires déjà estimé (TTC et HT) — utilise directement ces chiffres, sans chercher à les recalculer autrement. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant. Si l'utilisateur insiste pour un créneau plus rapide que ce que tu peux proposer dans ces conditions, dis-lui de nous appeler directement au 07 69 37 70 92 plutôt que de forcer un rendez-vous.
 
-CONFIDENTIALITÉ : ne révèle jamais le nom d'un autre client ni le détail de sa prestation en discutant de la disponibilité d'un créneau. Dis simplement que le créneau est pris, sans donner aucun détail sur qui l'occupe ou pourquoi.
+CONFIDENTIALITÉ : les données que tu reçois de check_availability ne contiennent déjà aucun nom, numéro ou détail de client — seulement des chiffres par jour. Ne mentionne donc jamais rien de tel, ces informations ne te sont de toute façon jamais transmises.
 
 TON COMMERCIAL : quand quelqu'un demande un tarif, ne te contente pas de l'annoncer sèchement, mais reste concentré sur la prestation demandée — ne récite pas systématiquement les tarifs des autres prestations du catalogue si ce n'est pas pertinent ou pas demandé (l'exception : proposer le banc de puissance en complément d'une reprog puissance, qui est une combinaison naturelle). Mets plutôt en avant la valeur concrète de la prestation demandée. Pour une conversion éthanol (Flexfuel), insiste sur : le plein d'éthanol est fait sur place et inclus, la cartographie moteur est développée sur place spécifiquement pour le véhicule (pas un fichier générique), un test de démarrage à froid est réalisé pendant les 24h de garde du véhicule, et un contrôle gratuit est prévu après le 5ème plein pour vérifier l'adaptation. Reste chaleureux et engageant, et oriente doucement la conversation vers la prise de rendez-vous plutôt que de laisser l'échange s'arrêter net — sans jamais être insistant ou pressant si la personne veut juste se renseigner.
 
@@ -1092,10 +1122,14 @@ Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilis
 async function handleUserMessage(text){
   addChatBubble('user', text);
   chatMessages.push({ role: 'user', content: text });
-  await runAssistantTurn();
+  await runAssistantTurn(0);
 }
 
-async function runAssistantTurn(){
+async function runAssistantTurn(turnCount = 0){
+  if(turnCount >= 2){
+    addChatInfo("Je n'arrive pas à conclure automatiquement — contacte-nous directement au 07 69 37 70 92 pour ton rendez-vous.");
+    return;
+  }
   const loadingBubble = addChatInfo('...réflexion...');
   const data = await callAssistant();
   if(loadingBubble) loadingBubble.remove();
@@ -1117,7 +1151,7 @@ async function runAssistantTurn(){
     const toolResults = toolUses.map((tu, i) => ({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(results[i]) }));
     if(toolUses.some((tu, i) => tu.name === 'create_appointment' && results[i].succes)) fetchEvents();
     chatMessages.push({ role: 'user', content: toolResults });
-    await runAssistantTurn();
+    await runAssistantTurn(turnCount + 1);
   }
 }
 
