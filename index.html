@@ -505,9 +505,25 @@ function renderLoading(){
 
 // Récupère un jeton d'accès frais auprès du relais Cloudflare (aucune interaction utilisateur,
 // aucune dépendance aux cookies du navigateur : fonctionne indéfiniment sans surveillance)
+// fetch avec délai maximum, et une retentative silencieuse avant d'abandonner pour de bon
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20000, retriesLeft = 1){
+  try{
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+    return res;
+  }catch(e){
+    if(retriesLeft > 0){
+      await new Promise(r => setTimeout(r, 1000)); // petite pause avant de retenter
+      return fetchWithTimeout(url, options, timeoutMs, retriesLeft - 1);
+    }
+    throw e;
+  }
+}
+
 async function getAccessToken(){
   try{
-    const res = await fetch(config.workerUrl);
+    const res = await fetchWithTimeout(config.workerUrl);
     if(!res.ok) throw new Error('relais indisponible');
     const data = await res.json();
     if(!data.access_token) throw new Error('réponse invalide');
@@ -526,7 +542,7 @@ async function getAccessToken(){
 // Requête authentifiée avec retentative automatique et unique si le jeton a expiré entre-temps
 async function authFetch(url, options = {}, allowRetry = true){
   const opts = { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` } };
-  const res = await fetch(url, opts);
+  const res = await fetchWithTimeout(url, opts);
   if(res.status === 401 && allowRetry){
     const ok = await getAccessToken();
     if(ok) return authFetch(url, options, false);
@@ -1059,11 +1075,11 @@ Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilis
     tools: BOOKING_TOOLS
   };
   try{
-    const res = await fetch(config.assistantWorkerUrl, {
+    const res = await fetchWithTimeout(config.assistantWorkerUrl, {
       method: 'POST',
       headers: { 'X-Auth-Key': config.assistantAccessKey, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    });
+    }, 30000);
     if(!res.ok) return null;
     return await res.json();
   }catch(e){
