@@ -1051,7 +1051,7 @@ async function callAssistant(){
   const todayStr = now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
   const todayISO = now.toISOString().slice(0, 10);
   const body = {
-    model: "claude-sonnet-5",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 1024,
     system: `Tu es l'assistant de prise de rendez-vous de l'atelier AG Sport Reprog (reprogrammation moteur). Nous sommes aujourd'hui le ${todayStr} (${todayISO} au format AAAA-MM-JJ) — utilise toujours cette date comme référence pour comprendre les demandes relatives ("demain", "la semaine prochaine", "vendredi prochain", etc.), ne te base jamais sur une autre date que celle-ci.
 
