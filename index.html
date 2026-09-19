@@ -1054,7 +1054,7 @@ CONFIDENTIALITÉ : ne révèle jamais le nom d'un autre client ni le détail de 
 
 TON COMMERCIAL : quand quelqu'un demande un tarif, ne te contente pas de l'annoncer sèchement, mais reste concentré sur la prestation demandée — ne récite pas systématiquement les tarifs des autres prestations du catalogue si ce n'est pas pertinent ou pas demandé (l'exception : proposer le banc de puissance en complément d'une reprog puissance, qui est une combinaison naturelle). Mets plutôt en avant la valeur concrète de la prestation demandée. Pour une conversion éthanol (Flexfuel), insiste sur : le plein d'éthanol est fait sur place et inclus, la cartographie moteur est développée sur place spécifiquement pour le véhicule (pas un fichier générique), un test de démarrage à froid est réalisé pendant les 24h de garde du véhicule, et un contrôle gratuit est prévu après le 5ème plein pour vérifier l'adaptation. Reste chaleureux et engageant, et oriente doucement la conversation vers la prise de rendez-vous plutôt que de laisser l'échange s'arrêter net — sans jamais être insistant ou pressant si la personne veut juste se renseigner.
 
-Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Réponds en français, de façon naturelle et concise.`,
+Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire — appelle-le UNE SEULE FOIS avec une plage large (au moins 10 à 14 jours à partir d'aujourd'hui), plutôt que de vérifier les jours un par un avec plusieurs appels successifs : ça te donne tout ce qu'il faut pour raisonner en un coup, et c'est beaucoup plus rapide pour l'utilisateur qui attend. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Réponds en français, de façon naturelle et concise.`,
     messages: chatMessages,
     tools: BOOKING_TOOLS
   };
@@ -1093,13 +1093,11 @@ async function runAssistantTurn(){
 
   const toolUses = data.content.filter(b => b.type === 'tool_use');
   if(toolUses.length > 0){
-    const toolResults = [];
-    for(const tu of toolUses){
-      addChatInfo(tu.name === 'create_appointment' ? '📅 Création du rendez-vous...' : '🔍 Vérification de l\'agenda...');
-      const result = await executeTool(tu.name, tu.input);
-      toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result) });
-      if(tu.name === 'create_appointment' && result.succes) fetchEvents();
-    }
+    if(toolUses.some(tu => tu.name === 'create_appointment')) addChatInfo('📅 Création du rendez-vous...');
+    if(toolUses.some(tu => tu.name === 'check_availability')) addChatInfo('🔍 Vérification de l\'agenda...');
+    const results = await Promise.all(toolUses.map(tu => executeTool(tu.name, tu.input)));
+    const toolResults = toolUses.map((tu, i) => ({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(results[i]) }));
+    if(toolUses.some((tu, i) => tu.name === 'create_appointment' && results[i].succes)) fetchEvents();
     chatMessages.push({ role: 'user', content: toolResults });
     await runAssistantTurn();
   }
