@@ -1021,7 +1021,7 @@ const REVENUE_KEYWORDS = [
   { keywords: ['egr'], priceTTC: 180 },
   { keywords: ['fap'], priceTTC: 180 },
   { keywords: ['adblue'], priceTTC: 350 },
-  { keywords: ['flexfuel', 'ethanol', 'éthanol', 'e85'], priceTTC: 690 },
+  { keywords: ['flexfuel', 'ethanol', 'éthanol', 'e85', 'flex'], priceTTC: 690 },
   { keywords: ['banc'], priceTTC: 120 },
   { keywords: ['puissance', 'reprog'], priceTTC: 500 }
 ];
@@ -1029,18 +1029,21 @@ function estimateRevenueTTC(title){
   const t = (title || '').toLowerCase();
 
   // 1. Cherche d'abord un montant écrit noir sur blanc dans le titre (plus fiable qu'une estimation par mot-clé)
-  const priceMatch = t.match(/(\d{2,5})(?:[.,](\d{1,2}))?\s*(?:€|eur|euros?)\b/);
+  const priceMatch = t.match(/(\d{2,5})(?:[.,](\d{1,2}))?\s*(?:€|(?:eur|euros?)\b)/);
   if(priceMatch){
     const entier = parseInt(priceMatch[1], 10);
     const decimales = priceMatch[2] ? parseInt(priceMatch[2], 10) / 100 : 0;
     return entier + decimales;
   }
 
-  // 2. Sinon, essaie de reconnaître la prestation par mot-clé dans le catalogue
+  // 2. Sinon, additionne le prix de CHAQUE prestation du catalogue reconnue dans le titre — un
+  // rendez-vous combiné (ex : "EGR + FAP + ADBLUE") doit compter la somme des prestations reconnues,
+  // pas seulement la première trouvée, sinon on sous-estime lourdement le CA réel de la journée.
+  let total = 0;
   for(const entry of REVENUE_KEYWORDS){
-    if(entry.keywords.some(k => t.includes(k))) return entry.priceTTC;
+    if(entry.keywords.some(k => t.includes(k))) total += entry.priceTTC;
   }
-  return 0;
+  return total;
 }
 
 async function executeTool(toolName, input){
@@ -1064,6 +1067,7 @@ async function executeTool(toolName, input){
           jour_semaine: d.toLocaleDateString('fr-FR', {weekday: 'long'}),
           date_affichage: d.toLocaleDateString('fr-FR', {weekday: 'long', day: 'numeric', month: 'long'}),
           nombre_rdv: 0,
+          nombre_rdv_montant_inconnu: 0,
           chiffre_affaires_ttc_estime: 0
         };
         d.setDate(d.getDate() + 1);
@@ -1075,13 +1079,15 @@ async function executeTool(toolName, input){
         const allDay = !ev.start?.dateTime;
         const dateKey = (startRaw || '').slice(0, 10);
         if(!dateKey) return;
+        const revenu = estimateRevenueTTC(ev.summary);
 
         // Un rendez-vous type Flexfuel garde le véhicule 24h (sur 2 jours calendaires) même si le
         // travail actif ne dure qu'environ 1h le jour du dépôt : on compte sa présence (nombre_rdv,
         // donc une place de garde prise) sur CHAQUE jour couvert, pas seulement le jour de début —
         // c'est la durée de garde qui détermine la disponibilité, pas le temps d'intervention. Le
-        // chiffre d'affaires, lui, n'est compté qu'une fois, le jour du dépôt, pour ne pas fausser
-        // l'objectif de CA journalier avec un même montant compté deux fois.
+        // chiffre d'affaires (et le compteur "montant inconnu", voir plus bas) ne sont comptés
+        // qu'une fois, le jour du dépôt, pour ne pas fausser l'objectif de CA journalier ni le
+        // filet de sécurité avec un même rendez-vous compté plusieurs fois.
         const isMultiDayEvent = allDay && endRaw && startRaw && (new Date(endRaw) - new Date(startRaw)) > 24 * 3600 * 1000;
         if(isMultiDayEvent){
           let d = new Date(startRaw + 'T00:00:00');
@@ -1091,22 +1097,38 @@ async function executeTool(toolName, input){
             if(parJour[key]) parJour[key].nombre_rdv += 1;
             d.setDate(d.getDate() + 1);
           }
-          if(parJour[dateKey]) parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
+          if(parJour[dateKey]){
+            parJour[dateKey].chiffre_affaires_ttc_estime += revenu;
+            if(revenu === 0) parJour[dateKey].nombre_rdv_montant_inconnu += 1;
+          }
         } else {
           if(!parJour[dateKey]) return;
           parJour[dateKey].nombre_rdv += 1;
-          parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
+          parJour[dateKey].chiffre_affaires_ttc_estime += revenu;
+          if(revenu === 0) parJour[dateKey].nombre_rdv_montant_inconnu += 1;
         }
       });
 
-      const jours = Object.values(parJour).map(j => ({
-        date: j.date,
-        jour_semaine: j.jour_semaine,
-        date_affichage: j.date_affichage,
-        nombre_rdv: j.nombre_rdv,
-        chiffre_affaires_ttc_estime: j.chiffre_affaires_ttc_estime,
-        chiffre_affaires_ht_estime: Math.round(j.chiffre_affaires_ttc_estime / 1.2)
-      })).sort((a, b) => a.date.localeCompare(b.date));
+      const jours = Object.values(parJour).map(j => {
+        const ht = Math.round(j.chiffre_affaires_ttc_estime / 1.2);
+        // Statut calculé ici, pas par le modèle : au-delà de 1300€ HT, ou si au moins 4 rendez-vous
+        // de la journée ont un titre dont on ne reconnaît ni prix ni prestation (donc une valeur
+        // totalement inconnue — pas juste un rendez-vous déjà compté ailleurs), la journée est
+        // considérée complète. Entre 900 et 1300€ HT, il reste un peu de place mais on privilégie
+        // un autre jour si possible.
+        let statut_journee = 'libre';
+        if(ht >= 1300 || j.nombre_rdv_montant_inconnu >= 4) statut_journee = 'complet';
+        else if(ht >= 900) statut_journee = 'presque complet';
+        return {
+          date: j.date,
+          jour_semaine: j.jour_semaine,
+          date_affichage: j.date_affichage,
+          nombre_rdv: j.nombre_rdv,
+          chiffre_affaires_ttc_estime: j.chiffre_affaires_ttc_estime,
+          chiffre_affaires_ht_estime: ht,
+          statut_journee
+        };
+      }).sort((a, b) => a.date.localeCompare(b.date));
 
       return { jours }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici — jour_semaine est toujours calculé ici, jamais à deviner
     }catch(e){
@@ -1160,9 +1182,9 @@ VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'Ad
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour de la plage demandée (même les jours totalement libres), sa date, son jour de la semaine (jour_semaine), une chaîne déjà assemblée prête à l'emploi (date_affichage, ex : "jeudi 24 septembre"), le nombre de rendez-vous (nombre_rdv) et le chiffre d'affaires déjà estimé (TTC et HT). RÈGLE ABSOLUE SUR LES DATES : quand tu mentionnes une date au client dans ta réponse, recopie TOUJOURS littéralement et telle quelle la valeur date_affichage correspondante fournie par check_availability (ex : si date_affichage vaut "jeudi 24 septembre", écris exactement "jeudi 24 septembre") — ne recompose JAMAIS toi-même l'association jour+date à partir de tes propres connaissances ou de la valeur date seule, même si tu es sûr de toi : les modèles de langage se trompent très souvent sur ce calcul de calendrier, et une erreur ici induit directement le client en erreur sur le bon jour. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant.
+OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour de la plage demandée (même les jours totalement libres), sa date, son jour de la semaine (jour_semaine), une chaîne déjà assemblée prête à l'emploi (date_affichage, ex : "jeudi 24 septembre"), le nombre de rendez-vous (nombre_rdv), le chiffre d'affaires déjà estimé (TTC et HT), et un statut déjà calculé (statut_journee) qui vaut "libre", "presque complet" ou "complet". RÈGLE ABSOLUE SUR LES DATES : quand tu mentionnes une date au client dans ta réponse, recopie TOUJOURS littéralement et telle quelle la valeur date_affichage correspondante fournie par check_availability (ex : si date_affichage vaut "jeudi 24 septembre", écris exactement "jeudi 24 septembre") — ne recompose JAMAIS toi-même l'association jour+date à partir de tes propres connaissances ou de la valeur date seule, même si tu es sûr de toi : les modèles de langage se trompent très souvent sur ce calcul de calendrier, et une erreur ici induit directement le client en erreur sur le bon jour. RÈGLE ABSOLUE SUR LA DISPONIBILITÉ : utilise TOUJOURS statut_journee tel quel pour juger si un jour est disponible — ne recalcule et ne réévalue JAMAIS toi-même si un jour est plein à partir du chiffre d'affaires ou du nombre de rendez-vous, même si le calcul te paraît simple : ne propose JAMAIS un jour "complet" (même s'il reste des heures visiblement libres dans la journée), propose en priorité les jours "libre", et ne propose un jour "presque complet" qu'en dernier recours si aucun jour "libre" n'existe dans la plage demandée.
 
-IMPORTANT — FILET DE SÉCURITÉ : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place). Ne te fie donc JAMAIS uniquement au chiffre d'affaires estimé pour juger qu'une journée est libre : regarde toujours aussi nombre_rdv. Si nombre_rdv est déjà élevé (5 ou plus) ce jour-là, considère la journée comme chargée et propose plutôt un autre jour, même si le chiffre d'affaires estimé semble bas.
+IMPORTANT — POURQUOI LE FILET DE SÉCURITÉ EXISTE : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu et aucun montant explicite (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place) — c'est pour ça que statut_journee ne se base pas seulement sur le chiffre d'affaires mais tient aussi compte du nombre de rendez-vous dont la valeur est totalement inconnue ce jour-là : tu n'as rien à recalculer, contente-toi de suivre statut_journee comme indiqué plus haut.
 
 Si l'utilisateur insiste pour un créneau plus rapide que ce que tu peux proposer dans ces conditions, dis-lui de nous appeler directement au 07 69 37 70 92 plutôt que de forcer un rendez-vous.
 
