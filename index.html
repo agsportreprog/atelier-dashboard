@@ -1062,6 +1062,7 @@ async function executeTool(toolName, input){
         parJour[dateKey] = {
           date: dateKey,
           jour_semaine: d.toLocaleDateString('fr-FR', {weekday: 'long'}),
+          date_affichage: d.toLocaleDateString('fr-FR', {weekday: 'long', day: 'numeric', month: 'long'}),
           nombre_rdv: 0,
           chiffre_affaires_ttc_estime: 0
         };
@@ -1070,15 +1071,38 @@ async function executeTool(toolName, input){
 
       (data.items || []).forEach(ev => {
         const startRaw = ev.start?.dateTime || ev.start?.date;
+        const endRaw = ev.end?.dateTime || ev.end?.date;
+        const allDay = !ev.start?.dateTime;
         const dateKey = (startRaw || '').slice(0, 10);
-        if(!dateKey || !parJour[dateKey]) return;
-        parJour[dateKey].nombre_rdv += 1;
-        parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
+        if(!dateKey) return;
+
+        // Un rendez-vous type Flexfuel garde le véhicule 24h (sur 2 jours calendaires) même si le
+        // travail actif ne dure qu'environ 1h le jour du dépôt : on compte sa présence (nombre_rdv,
+        // donc une place de garde prise) sur CHAQUE jour couvert, pas seulement le jour de début —
+        // c'est la durée de garde qui détermine la disponibilité, pas le temps d'intervention. Le
+        // chiffre d'affaires, lui, n'est compté qu'une fois, le jour du dépôt, pour ne pas fausser
+        // l'objectif de CA journalier avec un même montant compté deux fois.
+        const isMultiDayEvent = allDay && endRaw && startRaw && (new Date(endRaw) - new Date(startRaw)) > 24 * 3600 * 1000;
+        if(isMultiDayEvent){
+          let d = new Date(startRaw + 'T00:00:00');
+          const endD = new Date(endRaw); // borne exclusive
+          while(d < endD){
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            if(parJour[key]) parJour[key].nombre_rdv += 1;
+            d.setDate(d.getDate() + 1);
+          }
+          if(parJour[dateKey]) parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
+        } else {
+          if(!parJour[dateKey]) return;
+          parJour[dateKey].nombre_rdv += 1;
+          parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
+        }
       });
 
       const jours = Object.values(parJour).map(j => ({
         date: j.date,
         jour_semaine: j.jour_semaine,
+        date_affichage: j.date_affichage,
         nombre_rdv: j.nombre_rdv,
         chiffre_affaires_ttc_estime: j.chiffre_affaires_ttc_estime,
         chiffre_affaires_ht_estime: Math.round(j.chiffre_affaires_ttc_estime / 1.2)
@@ -1090,11 +1114,26 @@ async function executeTool(toolName, input){
     }
   }
   if(toolName === 'create_appointment'){
+    // Flexfuel garde le véhicule 24h (contrôle du démarrage à froid) : le rendez-vous doit occuper
+    // 2 jours calendaires même si le travail actif ne dure qu'environ 1h le jour du dépôt — la garde,
+    // pas le temps d'intervention, détermine la place prise. On le détecte automatiquement plutôt que
+    // de laisser le modèle calculer une date de fin lui-même.
+    const prestaLower = (input.presta || '').toLowerCase();
+    const isFlexfuel = /flexfuel|ethanol|éthanol|e85/.test(prestaLower);
+    let commentaire = input.commentaire || '';
+    let isMultiDay = false, endDate = '';
+    if(isFlexfuel){
+      isMultiDay = true;
+      const fin = new Date(input.date + 'T00:00:00');
+      fin.setDate(fin.getDate() + 1);
+      endDate = `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, '0')}-${String(fin.getDate()).padStart(2, '0')}`;
+      if(input.heure_debut) commentaire = `Dépôt véhicule vers ${input.heure_debut}.${commentaire ? ' ' + commentaire : ''}`;
+    }
     const ok = await createCalendarEvent({
       nom: input.nom || '', voiture: input.voiture || '', presta: input.presta || '',
-      numero: input.numero || '', commentaire: input.commentaire || '', courtesy: '',
+      numero: input.numero || '', commentaire, courtesy: '',
       date: input.date, startTime: input.heure_debut, endTime: input.heure_fin,
-      isMultiDay: false, endDate: ''
+      isMultiDay, endDate
     });
     return ok ? { succes: true, message: "Rendez-vous créé avec succès." } : { succes: false, message: "Échec de la création du rendez-vous." };
   }
@@ -1121,7 +1160,7 @@ VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'Ad
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour de la plage demandée (même les jours totalement libres), sa date, son jour de la semaine (jour_semaine), le nombre de rendez-vous (nombre_rdv) et le chiffre d'affaires déjà estimé (TTC et HT) — utilise TOUJOURS le jour_semaine fourni tel quel, ne calcule jamais toi-même quel jour de la semaine correspond à une date (les modèles de langage se trompent facilement sur ce genre de calcul de calendrier). Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant.
+OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour de la plage demandée (même les jours totalement libres), sa date, son jour de la semaine (jour_semaine), une chaîne déjà assemblée prête à l'emploi (date_affichage, ex : "jeudi 24 septembre"), le nombre de rendez-vous (nombre_rdv) et le chiffre d'affaires déjà estimé (TTC et HT). RÈGLE ABSOLUE SUR LES DATES : quand tu mentionnes une date au client dans ta réponse, recopie TOUJOURS littéralement et telle quelle la valeur date_affichage correspondante fournie par check_availability (ex : si date_affichage vaut "jeudi 24 septembre", écris exactement "jeudi 24 septembre") — ne recompose JAMAIS toi-même l'association jour+date à partir de tes propres connaissances ou de la valeur date seule, même si tu es sûr de toi : les modèles de langage se trompent très souvent sur ce calcul de calendrier, et une erreur ici induit directement le client en erreur sur le bon jour. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant.
 
 IMPORTANT — FILET DE SÉCURITÉ : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place). Ne te fie donc JAMAIS uniquement au chiffre d'affaires estimé pour juger qu'une journée est libre : regarde toujours aussi nombre_rdv. Si nombre_rdv est déjà élevé (5 ou plus) ce jour-là, considère la journée comme chargée et propose plutôt un autre jour, même si le chiffre d'affaires estimé semble bas.
 
@@ -1131,7 +1170,7 @@ CONFIDENTIALITÉ : les données que tu reçois de check_availability ne contienn
 
 TON COMMERCIAL : quand quelqu'un demande un tarif, ne te contente pas de l'annoncer sèchement, mais reste concentré sur la prestation demandée — ne récite pas systématiquement les tarifs des autres prestations du catalogue si ce n'est pas pertinent ou pas demandé (l'exception : proposer le banc de puissance en complément d'une reprog puissance, qui est une combinaison naturelle). Mets plutôt en avant la valeur concrète de la prestation demandée. Pour une conversion éthanol (Flexfuel), insiste sur : le plein d'éthanol est fait sur place et inclus, la cartographie moteur est développée sur place spécifiquement pour le véhicule (pas un fichier générique), un test de démarrage à froid est réalisé pendant les 24h de garde du véhicule, et un contrôle gratuit est prévu après le 5ème plein pour vérifier l'adaptation. Reste chaleureux et engageant, et oriente doucement la conversation vers la prise de rendez-vous plutôt que de laisser l'échange s'arrêter net — sans jamais être insistant ou pressant si la personne veut juste se renseigner.
 
-Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire — appelle-le UNE SEULE FOIS avec une plage large (au moins 10 à 14 jours à partir d'aujourd'hui), plutôt que de vérifier les jours un par un avec plusieurs appels successifs : ça te donne tout ce qu'il faut pour raisonner en un coup, et c'est beaucoup plus rapide pour l'utilisateur qui attend. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Réponds en français, de façon naturelle et concise.`,
+Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire — appelle-le UNE SEULE FOIS avec une plage large (au moins 10 à 14 jours à partir d'aujourd'hui), plutôt que de vérifier les jours un par un avec plusieurs appels successifs : ça te donne tout ce qu'il faut pour raisonner en un coup, et c'est beaucoup plus rapide pour l'utilisateur qui attend. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Pour un Flexfuel, heure_debut correspond à l'heure de dépôt du véhicule : la garde de 24h qui suit (jusqu'au lendemain) est ajoutée automatiquement par le système, tu n'as rien à calculer toi-même pour la date de fin. Réponds en français, de façon naturelle et concise.`,
     messages: chatMessages,
     tools: BOOKING_TOOLS
   };
