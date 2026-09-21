@@ -1027,6 +1027,16 @@ const REVENUE_KEYWORDS = [
 ];
 function estimateRevenueTTC(title){
   const t = (title || '').toLowerCase();
+
+  // 1. Cherche d'abord un montant écrit noir sur blanc dans le titre (plus fiable qu'une estimation par mot-clé)
+  const priceMatch = t.match(/(\d{2,5})(?:[.,](\d{1,2}))?\s*(?:€|eur|euros?)\b/);
+  if(priceMatch){
+    const entier = parseInt(priceMatch[1], 10);
+    const decimales = priceMatch[2] ? parseInt(priceMatch[2], 10) / 100 : 0;
+    return entier + decimales;
+  }
+
+  // 2. Sinon, essaie de reconnaître la prestation par mot-clé dans le catalogue
   for(const entry of REVENUE_KEYWORDS){
     if(entry.keywords.some(k => t.includes(k))) return entry.priceTTC;
   }
@@ -1090,13 +1100,17 @@ HORAIRES D'OUVERTURE : du lundi au jeudi de 9h15 à 12h00 et de 14h00 à 18h00, 
 CATALOGUE DES PRESTATIONS (prix, temps de travail actif, occupation du planning, capacité en simultané) :
 ${PRESTATIONS_CATALOG}
 
-IMPORTANT : le "temps de travail actif" indiqué ci-dessus (ex : "30 min", "1h") est une donnée strictement interne, réservée à ton propre calcul de capacité — ne la communique JAMAIS au client, même reformulée. Face au client, exprime uniquement la durée en "demi-journée" ou "journée complète" (reprends l'information "occupe..." du catalogue), jamais en minutes ou en heures précises.
+IMPORTANT : le "temps de travail actif" indiqué ci-dessus (ex : "30 min", "1h") est une donnée strictement interne, réservée à ton propre calcul de capacité — ne la communique JAMAIS au client, même reformulée. Face au client, reprends uniquement l'information "occupe..." du catalogue pour CETTE prestation précise — "une demi-journée" pour l'EGR/le FAP/l'AdBlue, "une journée complète" pour la reprogrammation puissance, "24h" pour un Flexfuel (le véhicule reste toute une journée et une nuit pour le contrôle du démarrage à froid) — ne dis jamais "demi-journée" pour un Flexfuel ni pour une reprog puissance, et ne détaille jamais "matin" ou "après-midi" avec des horaires précis (ex : jamais "9h15-12h00" ou "14h00-18h00"). Ne propose jamais non plus une longue liste de créneaux sur plusieurs jours ou semaines d'un coup : propose 2 ou 3 dates qui te semblent les plus pertinentes, laisse l'utilisateur réagir, et affine ensuite. C'est plus clair pour lui et plus naturel dans une conversation.
 
 VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'AdBlue, même si le client l'emploie lui-même — toujours dire "mise à jour" (ex : "mise à jour de la vanne EGR", "mise à jour du FAP", "mise à jour AdBlue"), y compris dans les messages de confirmation et dans les rendez-vous créés.
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour, le nombre de rendez-vous et le chiffre d'affaires déjà estimé (TTC et HT) — utilise directement ces chiffres, sans chercher à les recalculer autrement. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant. Si l'utilisateur insiste pour un créneau plus rapide que ce que tu peux proposer dans ces conditions, dis-lui de nous appeler directement au 07 69 37 70 92 plutôt que de forcer un rendez-vous.
+OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour, le nombre de rendez-vous (nombre_rdv) et le chiffre d'affaires déjà estimé (TTC et HT) — utilise directement ces chiffres, sans chercher à les recalculer autrement. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant.
+
+IMPORTANT — FILET DE SÉCURITÉ : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place). Ne te fie donc JAMAIS uniquement au chiffre d'affaires estimé pour juger qu'une journée est libre : regarde toujours aussi nombre_rdv. Si nombre_rdv est déjà élevé (5 ou plus) ce jour-là, considère la journée comme chargée et propose plutôt un autre jour, même si le chiffre d'affaires estimé semble bas.
+
+Si l'utilisateur insiste pour un créneau plus rapide que ce que tu peux proposer dans ces conditions, dis-lui de nous appeler directement au 07 69 37 70 92 plutôt que de forcer un rendez-vous.
 
 CONFIDENTIALITÉ : les données que tu reçois de check_availability ne contiennent déjà aucun nom, numéro ou détail de client — seulement des chiffres par jour. Ne mentionne donc jamais rien de tel, ces informations ne te sont de toute façon jamais transmises.
 
