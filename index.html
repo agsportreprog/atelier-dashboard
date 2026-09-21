@@ -1092,14 +1092,22 @@ async function executeTool(toolName, input){
         if(isMultiDayEvent){
           let d = new Date(startRaw + 'T00:00:00');
           const endD = new Date(endRaw); // borne exclusive
+          let clefAttribution = null; // premier jour VISIBLE (dans la plage demandée) que cet événement touche
           while(d < endD){
             const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            if(parJour[key]) parJour[key].nombre_rdv += 1;
+            if(parJour[key]){
+              parJour[key].nombre_rdv += 1;
+              if(clefAttribution === null) clefAttribution = key;
+            }
             d.setDate(d.getDate() + 1);
           }
-          if(parJour[dateKey]){
-            parJour[dateKey].chiffre_affaires_ttc_estime += revenu;
-            if(revenu === 0) parJour[dateKey].nombre_rdv_montant_inconnu += 1;
+          // Le CA est attribué au premier jour VISIBLE que l'événement touche, pas forcément son
+          // vrai jour de début : un Flexfuel déposé hier et encore là aujourd'hui doit quand même
+          // compter dans le CA d'aujourd'hui, sinon son montant disparaît purement et simplement
+          // dès que son dépôt tombe avant le début de la plage demandée à check_availability.
+          if(clefAttribution){
+            parJour[clefAttribution].chiffre_affaires_ttc_estime += revenu;
+            if(revenu === 0) parJour[clefAttribution].nombre_rdv_montant_inconnu += 1;
           }
         } else {
           if(!parJour[dateKey]) return;
