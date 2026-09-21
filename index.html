@@ -1053,23 +1053,38 @@ async function executeTool(toolName, input){
       if(!res.ok) return { error: "Impossible de consulter l'agenda." };
       const data = await res.json();
 
+      // Une entrée pour CHAQUE jour de la plage (même totalement libre), pour que jour_semaine soit toujours fiable
       const parJour = {};
+      let d = new Date(input.date_debut + 'T12:00:00');
+      const fin = new Date(input.date_fin + 'T12:00:00');
+      while(d <= fin){
+        const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        parJour[dateKey] = {
+          date: dateKey,
+          jour_semaine: d.toLocaleDateString('fr-FR', {weekday: 'long'}),
+          nombre_rdv: 0,
+          chiffre_affaires_ttc_estime: 0
+        };
+        d.setDate(d.getDate() + 1);
+      }
+
       (data.items || []).forEach(ev => {
         const startRaw = ev.start?.dateTime || ev.start?.date;
         const dateKey = (startRaw || '').slice(0, 10);
-        if(!dateKey) return;
-        if(!parJour[dateKey]) parJour[dateKey] = { date: dateKey, nombre_rdv: 0, chiffre_affaires_ttc_estime: 0 };
+        if(!dateKey || !parJour[dateKey]) return;
         parJour[dateKey].nombre_rdv += 1;
         parJour[dateKey].chiffre_affaires_ttc_estime += estimateRevenueTTC(ev.summary);
       });
+
       const jours = Object.values(parJour).map(j => ({
         date: j.date,
+        jour_semaine: j.jour_semaine,
         nombre_rdv: j.nombre_rdv,
         chiffre_affaires_ttc_estime: j.chiffre_affaires_ttc_estime,
         chiffre_affaires_ht_estime: Math.round(j.chiffre_affaires_ttc_estime / 1.2)
       })).sort((a, b) => a.date.localeCompare(b.date));
 
-      return { jours }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici
+      return { jours }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici — jour_semaine est toujours calculé ici, jamais à deviner
     }catch(e){
       return { error: "Erreur lors de la consultation de l'agenda." };
     }
@@ -1106,7 +1121,7 @@ VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'Ad
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour, le nombre de rendez-vous (nombre_rdv) et le chiffre d'affaires déjà estimé (TTC et HT) — utilise directement ces chiffres, sans chercher à les recalculer autrement. Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant.
+OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour de la plage demandée (même les jours totalement libres), sa date, son jour de la semaine (jour_semaine), le nombre de rendez-vous (nombre_rdv) et le chiffre d'affaires déjà estimé (TTC et HT) — utilise TOUJOURS le jour_semaine fourni tel quel, ne calcule jamais toi-même quel jour de la semaine correspond à une date (les modèles de langage se trompent facilement sur ce genre de calcul de calendrier). Dès qu'un jour atteint environ 1300€ HT déjà pris, ne propose plus ce jour-là — même s'il reste physiquement des créneaux libres — et propose plutôt le jour suivant.
 
 IMPORTANT — FILET DE SÉCURITÉ : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place). Ne te fie donc JAMAIS uniquement au chiffre d'affaires estimé pour juger qu'une journée est libre : regarde toujours aussi nombre_rdv. Si nombre_rdv est déjà élevé (5 ou plus) ce jour-là, considère la journée comme chargée et propose plutôt un autre jour, même si le chiffre d'affaires estimé semble bas.
 
