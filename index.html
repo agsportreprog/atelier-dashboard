@@ -1109,7 +1109,7 @@ async function executeTool(toolName, input){
         }
       });
 
-      const jours = Object.values(parJour).map(j => {
+      const joursCalcules = Object.values(parJour).map(j => {
         const ht = Math.round(j.chiffre_affaires_ttc_estime / 1.2);
         // Statut calculé ici, pas par le modèle : au-delà de 1300€ HT, ou si au moins 4 rendez-vous
         // de la journée ont un titre dont on ne reconnaît ni prix ni prestation (donc une valeur
@@ -1130,7 +1130,18 @@ async function executeTool(toolName, input){
         };
       }).sort((a, b) => a.date.localeCompare(b.date));
 
-      return { jours }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici — jour_semaine est toujours calculé ici, jamais à deviner
+      // Les jours "complet" ne sont JAMAIS transmis au modèle : une instruction ("ne propose jamais
+      // un jour complet"), même explicite et répétée, n'est pas fiable à 100 % — supprimer
+      // carrément la donnée est la seule garantie qu'il ne puisse pas les proposer par erreur.
+      const jours = joursCalcules.filter(j => j.statut_journee !== 'complet');
+      const nombreJoursComplets = joursCalcules.length - jours.length;
+      if(jours.length === 0){
+        return { jours: [], note: `Les ${nombreJoursComplets} jour(s) de cette plage sont tous complets. Rappelle check_availability avec une plage de dates plus tardive pour trouver un jour disponible.` };
+      }
+      return {
+        jours,
+        ...(nombreJoursComplets > 0 ? { jours_complets_non_affiches: nombreJoursComplets } : {})
+      }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici — jour_semaine est toujours calculé ici, jamais à deviner
     }catch(e){
       return { error: "Erreur lors de la consultation de l'agenda." };
     }
@@ -1182,7 +1193,7 @@ VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'Ad
 
 Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
 
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour de la plage demandée (même les jours totalement libres), sa date, son jour de la semaine (jour_semaine), une chaîne déjà assemblée prête à l'emploi (date_affichage, ex : "jeudi 24 septembre"), le nombre de rendez-vous (nombre_rdv), le chiffre d'affaires déjà estimé (TTC et HT), et un statut déjà calculé (statut_journee) qui vaut "libre", "presque complet" ou "complet". RÈGLE ABSOLUE SUR LES DATES : quand tu mentionnes une date au client dans ta réponse, recopie TOUJOURS littéralement et telle quelle la valeur date_affichage correspondante fournie par check_availability (ex : si date_affichage vaut "jeudi 24 septembre", écris exactement "jeudi 24 septembre") — ne recompose JAMAIS toi-même l'association jour+date à partir de tes propres connaissances ou de la valeur date seule, même si tu es sûr de toi : les modèles de langage se trompent très souvent sur ce calcul de calendrier, et une erreur ici induit directement le client en erreur sur le bon jour. RÈGLE ABSOLUE SUR LA DISPONIBILITÉ : utilise TOUJOURS statut_journee tel quel pour juger si un jour est disponible — ne recalcule et ne réévalue JAMAIS toi-même si un jour est plein à partir du chiffre d'affaires ou du nombre de rendez-vous, même si le calcul te paraît simple : ne propose JAMAIS un jour "complet" (même s'il reste des heures visiblement libres dans la journée), propose en priorité les jours "libre", et ne propose un jour "presque complet" qu'en dernier recours si aucun jour "libre" n'existe dans la plage demandée.
+OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. check_availability te donne directement, pour chaque jour DISPONIBLE de la plage demandée (les jours complets ne te sont jamais transmis — voir plus bas), sa date, son jour de la semaine (jour_semaine), une chaîne déjà assemblée prête à l'emploi (date_affichage, ex : "jeudi 24 septembre"), le nombre de rendez-vous (nombre_rdv), le chiffre d'affaires déjà estimé (TTC et HT), et un statut déjà calculé (statut_journee) qui vaut "libre" ou "presque complet". RÈGLE ABSOLUE SUR LES DATES : quand tu mentionnes une date au client dans ta réponse, recopie TOUJOURS littéralement et telle quelle la valeur date_affichage correspondante fournie par check_availability (ex : si date_affichage vaut "jeudi 24 septembre", écris exactement "jeudi 24 septembre") — ne recompose JAMAIS toi-même l'association jour+date à partir de tes propres connaissances ou de la valeur date seule, même si tu es sûr de toi : les modèles de langage se trompent très souvent sur ce calcul de calendrier, et une erreur ici induit directement le client en erreur sur le bon jour. DISPONIBILITÉ : les jours complets sont déjà retirés de la liste jours par le système — tu ne peux donc proposer QUE des jours qui s'y trouvent, ce qui garantit que tu ne proposes jamais un jour déjà plein. Parmi les jours restants, propose en priorité ceux au statut "libre" avant ceux au statut "presque complet" (mais les deux restent des propositions valables, contrairement à un jour complet qui n'apparaît de toute façon plus dans la liste). Si le champ jours_complets_non_affiches est présent, ça t'indique juste que d'autres jours existent dans la plage mais sont déjà pris, sans plus de détail — inutile de le mentionner au client sauf s'il demande pourquoi tu ne proposes pas telle date précise. Si la liste jours est vide et qu'un champ note est présent, ça signifie que TOUTE la plage demandée est complète : rappelle immédiatement check_availability avec une plage de dates qui commence plus tard, plutôt que d'inventer une date ou de dire au client qu'il n'y a aucune place du tout.
 
 IMPORTANT — POURQUOI LE FILET DE SÉCURITÉ EXISTE : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu et aucun montant explicite (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place) — c'est pour ça que statut_journee ne se base pas seulement sur le chiffre d'affaires mais tient aussi compte du nombre de rendez-vous dont la valeur est totalement inconnue ce jour-là : tu n'as rien à recalculer, contente-toi de suivre statut_journee comme indiqué plus haut.
 
