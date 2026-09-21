@@ -1081,35 +1081,40 @@ async function executeTool(toolName, input){
         if(!dateKey) return;
         const revenu = estimateRevenueTTC(ev.summary);
 
-        // Un rendez-vous type Flexfuel garde le véhicule 24h (sur 2 jours calendaires) même si le
-        // travail actif ne dure qu'environ 1h le jour du dépôt : on compte sa présence (nombre_rdv,
-        // donc une place de garde prise) sur CHAQUE jour couvert, pas seulement le jour de début —
-        // c'est la durée de garde qui détermine la disponibilité, pas le temps d'intervention. Le
-        // chiffre d'affaires (et le compteur "montant inconnu", voir plus bas) ne sont comptés
-        // qu'une fois, le jour du dépôt, pour ne pas fausser l'objectif de CA journalier ni le
-        // filet de sécurité avec un même rendez-vous compté plusieurs fois.
-        const isMultiDayEvent = allDay && endRaw && startRaw && (new Date(endRaw) - new Date(startRaw)) > 24 * 3600 * 1000;
-        if(isMultiDayEvent){
+        // RÈGLE DE COMPTAGE (définie par l'atelier) :
+        // - Rendez-vous de 24h ou moins (marge de sécurité jusqu'à 26h réelles — ex : Flexfuel, dépôt
+        //   un jour, récupération le lendemain, donc 2 jours calendaires dans Google Agenda même si
+        //   c'est ~24h réelles) : compté une seule fois, sur le jour de DÉPÔT uniquement (nombre_rdv
+        //   ET chiffre d'affaires complet) — même si le véhicule reste visible sur 2 jours dans
+        //   l'agenda. 2 jours calendaires couvrent bien jusqu'à 48h, largement assez de marge au-delà
+        //   des 26h réelles visées, donc ce seuil ne bascule jamais un Flexfuel classique par erreur.
+        // - Rendez-vous de plus de 26h réelles (3 jours calendaires ou plus, ex : une préparation
+        //   moteur qui s'étale sur plusieurs jours) : compté EN GLOBALITÉ — le chiffre d'affaires
+        //   total est DIVISÉ par le nombre de jours couverts et réparti à parts égales sur chacun
+        //   (ex : 1000€ sur 4 jours = 250€/jour), pour ne pas gonfler artificiellement le CA de
+        //   chaque jour avec le même montant répété en entier. La présence du véhicule (nombre_rdv),
+        //   elle, compte en entier chaque jour : ce n'est pas une question de part, une vraie place
+        //   est prise chaque jour, qu'importe la fraction de CA qui lui est associée.
+        const spanMs = (allDay && endRaw && startRaw) ? (new Date(endRaw) - new Date(startRaw)) : 0;
+        const spanJoursCalendaires = spanMs / (24 * 3600 * 1000);
+
+        if(allDay && spanJoursCalendaires > 2){
           let d = new Date(startRaw + 'T00:00:00');
           const endD = new Date(endRaw); // borne exclusive
-          let clefAttribution = null; // premier jour VISIBLE (dans la plage demandée) que cet événement touche
+          const joursCouverts = Math.round(spanJoursCalendaires);
+          const revenuParJour = revenu / joursCouverts;
           while(d < endD){
             const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
             if(parJour[key]){
               parJour[key].nombre_rdv += 1;
-              if(clefAttribution === null) clefAttribution = key;
+              parJour[key].chiffre_affaires_ttc_estime += revenuParJour;
+              if(revenu === 0) parJour[key].nombre_rdv_montant_inconnu += 1;
             }
             d.setDate(d.getDate() + 1);
           }
-          // Le CA est attribué au premier jour VISIBLE que l'événement touche, pas forcément son
-          // vrai jour de début : un Flexfuel déposé hier et encore là aujourd'hui doit quand même
-          // compter dans le CA d'aujourd'hui, sinon son montant disparaît purement et simplement
-          // dès que son dépôt tombe avant le début de la plage demandée à check_availability.
-          if(clefAttribution){
-            parJour[clefAttribution].chiffre_affaires_ttc_estime += revenu;
-            if(revenu === 0) parJour[clefAttribution].nombre_rdv_montant_inconnu += 1;
-          }
         } else {
+          // 24h ou moins (y compris un Flexfuel classique sur 2 jours calendaires), ou rendez-vous
+          // classique à l'heure sur un seul jour : compté une seule fois, sur le jour de dépôt/début.
           if(!parJour[dateKey]) return;
           parJour[dateKey].nombre_rdv += 1;
           parJour[dateKey].chiffre_affaires_ttc_estime += revenu;
