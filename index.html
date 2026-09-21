@@ -400,6 +400,14 @@ function detectTool(filename){
   return /slave/i.test(filename || '') ? 'Autotuner' : 'MMS';
 }
 
+// Extrait une plaque d'immatriculation (format SIV : AA-123-AA, avec ou sans tirets/espaces) depuis
+// l'objet du mail reçu — renvoie null si aucune plaque reconnaissable n'est trouvée.
+function extractPlaque(subject){
+  const m = (subject || '').match(/\b([A-Za-z]{2})[\s-]?(\d{3})[\s-]?([A-Za-z]{2})\b/);
+  if(!m) return null;
+  return `${m[1].toUpperCase()}-${m[2]}-${m[3].toUpperCase()}`;
+}
+
 const app = document.getElementById('app');
 
 // Débloque l'audio dès la première interaction (obligatoire sur mobile/tablette avant de pouvoir jouer un son)
@@ -833,6 +841,84 @@ function renderRemoteTasksHtml(){
     </div>
     ${cards}
   `;
+}
+
+// Récapitulatif PDF (imprimable) de TOUS les dossiers à distance reçus dans le mois en cours (mails
+// de tes correspondants habituels, peu importe l'outil détecté — MMS ou Autotuner), avec la plaque
+// de chaque véhicule extraite de l'objet du mail. Inclut TOUS les dossiers du mois (y compris ceux
+// déjà marqués "fait"), pas seulement les dossiers encore actifs affichés dans la liste.
+function printMonthlyRemoteTasksRecap(){
+  const now = new Date();
+  const debutMois = new Date(now.getFullYear(), now.getMonth(), 1);
+  const finMois = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999); // dernier jour du mois en cours
+
+  const dossiers = remoteTasks
+    .filter(t => {
+      const d = new Date(t.receivedAt);
+      return d >= debutMois && d <= finMois;
+    })
+    .sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt));
+
+  if(dossiers.length === 0){
+    alert("Aucun dossier à distance reçu ce mois-ci.");
+    return;
+  }
+
+  const moisLabel = now.toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'});
+  const dateStr = now.toLocaleDateString('fr-FR', {day:'numeric', month:'long', year:'numeric'});
+
+  const rows = dossiers.map(t => {
+    const plaque = extractPlaque(t.subject) || '—';
+    const dateLabel = new Date(t.receivedAt).toLocaleDateString('fr-FR', {day:'numeric', month:'short'});
+    return `
+      <tr>
+        <td>${dateLabel}</td>
+        <td class="plaque">${escapeHtml(plaque)}</td>
+        <td>${escapeHtml(t.subject || '(sans objet)')}</td>
+        <td>${escapeHtml(t.tool || '')}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Récapitulatif dossiers à distance — ${escapeHtml(moisLabel)}</title>
+<style>
+  body{ font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding:40px; color:#1a1a1a; max-width:800px; margin:0 auto; }
+  h1{ font-size:21px; margin:0 0 4px; }
+  .sub{ color:#666; font-size:13px; margin-bottom:32px; }
+  table{ width:100%; border-collapse:collapse; margin-top:10px; }
+  th{ text-align:left; padding:10px 12px; background:#1a1a1a; color:#fff; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  td{ padding:10px 12px; border-bottom:1px solid #ddd; font-size:14px; }
+  td.plaque{ font-weight:700; font-family:'Courier New',monospace; letter-spacing:.05em; }
+  tr:nth-child(even){ background:#f9f9f9; }
+  .brand{ font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:#ff6a2b; font-weight:700; margin-bottom:8px; }
+  .footer{ margin-top:28px; font-size:11px; color:#999; }
+  @media print{ body{ padding:15px; } th{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style>
+</head>
+<body>
+  <div class="brand">AG Sport Reprog</div>
+  <h1>Récapitulatif dossiers à distance — ${escapeHtml(moisLabel)}</h1>
+  <div class="sub">Édité le ${dateStr} — ${dossiers.length} dossier${dossiers.length > 1 ? 's' : ''}</div>
+  <table>
+    <thead><tr><th>Date</th><th>Plaque</th><th>Objet du mail</th><th>Outil</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="footer">Plaque extraite automatiquement de l'objet du mail — à vérifier manuellement si affichée "—".</div>
+  <script>window.onload = () => window.print();<\/script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if(w){
+    w.document.write(html);
+    w.document.close();
+  } else {
+    alert("Le navigateur a bloqué l'ouverture de la fenêtre d'impression. Autorise les pop-ups pour ce site.");
+  }
 }
 
 async function fetchEvents(){
@@ -1876,6 +1962,7 @@ function renderList(){
         <button id="assistantBtn">💬 Assistant IA</button>
         <button id="refreshBtn">↻ Actualiser</button>
         <button id="scanMailBtn">📧 Vérifier les mails</button>
+        <button id="slaveRecapBtn">📋 Récap du mois</button>
         <button id="settingsBtn">⚙</button>
       </div>
     </div>
@@ -1899,6 +1986,7 @@ function renderList(){
     console.log('[dossiers à distance] vérification manuelle déclenchée');
     scanGmailForNewTasks();
   };
+  document.getElementById('slaveRecapBtn').onclick = printMonthlyRemoteTasksRecap;
   document.getElementById('searchBtn').onclick = openSearchModal;
   document.getElementById('newEventBtn').onclick = openNewEventModal;
   document.getElementById('assistantBtn').onclick = openAssistantModal;
