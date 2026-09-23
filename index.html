@@ -408,7 +408,7 @@ const BOOKING_TOOLS = [
         heure_fin: { type: "string", description: "HH:MM" },
         commentaire: { type: "string", description: "Précisions optionnelles" }
       },
-      required: ["nom", "voiture", "date", "heure_debut", "heure_fin"]
+      required: ["nom", "voiture", "numero", "date", "heure_debut", "heure_fin"]
     }
   }
 ];
@@ -1471,6 +1471,12 @@ async function executeTool(toolName, input){
     }
   }
   if(toolName === 'create_appointment'){
+    // Le "required" du schéma garantit seulement que le champ existe dans l'appel, pas qu'il
+    // contient une vraie valeur (une chaîne vide passerait) — vérification explicite ici, qui
+    // bloque réellement la création si le nom ou le numéro manquent.
+    if(!input.nom || !input.nom.trim() || !input.numero || !input.numero.trim()){
+      return { succes: false, message: "Le nom et le numéro de téléphone du client sont obligatoires avant de créer le rendez-vous — demande-les au client s'ils manquent, puis réessaie." };
+    }
     // Flexfuel garde le véhicule 24h (contrôle du démarrage à froid) : le rendez-vous doit occuper
     // 2 jours calendaires même si le travail actif ne dure qu'environ 1h le jour du dépôt — la garde,
     // pas le temps d'intervention, détermine la place prise. On le détecte automatiquement plutôt que
@@ -1557,7 +1563,7 @@ CONFIDENTIALITÉ : les données que tu reçois de check_availability ne contienn
 
 TON COMMERCIAL : quand quelqu'un demande un tarif, ne te contente pas de l'annoncer sèchement, mais reste concentré sur la prestation demandée — ne récite pas systématiquement les tarifs des autres prestations du catalogue si ce n'est pas pertinent ou pas demandé (l'exception : proposer le banc de puissance en complément d'une reprog puissance, qui est une combinaison naturelle). Mets plutôt en avant la valeur concrète de la prestation demandée. Pour une conversion éthanol (Flexfuel), insiste sur : le plein d'éthanol est fait sur place et inclus, la cartographie moteur est développée sur place spécifiquement pour le véhicule (pas un fichier générique), un test de démarrage à froid est réalisé pendant les 24h de garde du véhicule, et un contrôle gratuit est prévu après le 5ème plein pour vérifier l'adaptation. Reste chaleureux et engageant, et oriente doucement la conversation vers la prise de rendez-vous plutôt que de laisser l'échange s'arrêter net — sans jamais être insistant ou pressant si la personne veut juste se renseigner.
 
-Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire — appelle-le UNE SEULE FOIS avec une plage large (au moins 10 à 14 jours à partir d'aujourd'hui), plutôt que de vérifier les jours un par un avec plusieurs appels successifs : ça te donne tout ce qu'il faut pour raisonner en un coup, et c'est beaucoup plus rapide pour l'utilisateur qui attend. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure. Pour un Flexfuel, heure_debut correspond à l'heure de dépôt du véhicule : la garde de 24h qui suit (jusqu'au lendemain) est ajoutée automatiquement par le système, tu n'as rien à calculer toi-même pour la date de fin. Réponds en français, de façon naturelle et concise.`,
+Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire — appelle-le UNE SEULE FOIS avec une plage large (au moins 10 à 14 jours à partir d'aujourd'hui), plutôt que de vérifier les jours un par un avec plusieurs appels successifs : ça te donne tout ce qu'il faut pour raisonner en un coup, et c'est beaucoup plus rapide pour l'utilisateur qui attend. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure — ET après avoir obtenu son NOM et son NUMÉRO DE TÉLÉPHONE, tous deux obligatoires (le système refuse la création sans ces deux informations). Si le client ne les a pas encore donnés spontanément, demande-les avant de créer le rendez-vous — ne le crée jamais "provisoirement" en espérant les récupérer après. Pour un Flexfuel, heure_debut correspond à l'heure de dépôt du véhicule : la garde de 24h qui suit (jusqu'au lendemain) est ajoutée automatiquement par le système, tu n'as rien à calculer toi-même pour la date de fin. Réponds en français, de façon naturelle et concise.`,
     messages: chatMessages,
     tools: BOOKING_TOOLS
   };
