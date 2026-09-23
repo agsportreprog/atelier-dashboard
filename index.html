@@ -217,15 +217,6 @@
   }
   .mc-cell.mc-selected .mc-count{background:#1a0d05; color:var(--accent);}
   .modal-newevent{max-width:none; width:98vw; max-height:96vh; overflow-y:auto;}
-  .modal-assistant{max-width:560px;}
-  .chat-messages{max-height:420px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:14px; padding:4px;}
-  .chat-bubble{padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.45; max-width:85%;}
-  .chat-bubble.user{background:var(--accent); color:#1a0d05; align-self:flex-end;}
-  .chat-bubble.assistant{background:var(--panel-2); color:var(--text); align-self:flex-start;}
-  .chat-bubble.tool-info{background:transparent; border:1px dashed var(--line-solid); color:var(--text-dim); font-size:12px; align-self:center; font-style:italic; max-width:95%;}
-  .chat-input-row{display:flex; gap:8px;}
-  .chat-input-row input{flex:1; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid); background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;}
-  .chat-input-row button{padding:11px 18px; border-radius:9px; border:none; background:var(--accent); color:#1a0d05; font-weight:700; cursor:pointer;}
   .modal-newevent .newevent-left{flex:0 0 360px;}
   .modal-newevent .newevent-right{flex:1 1 600px;}
   .month-summary{
@@ -314,13 +305,7 @@
   }
   .noshow-btn:hover{ opacity:1; background:#8a202022; }
   .noshow-btn.charged{ border-color:#5a5a5a; color:#8a8a8a; opacity:0.6; cursor:default; }
-  .card-stripe-form{ background:#1a1a1a; border-radius:10px; padding:14px; margin-top:8px; }
-  .card-stripe-form .policy{ font-size:12px; color:var(--text-dim); margin-bottom:10px; line-height:1.4; }
-  #stripeCardElement{ background:#fff; border-radius:6px; padding:10px; margin-bottom:10px; }
-  .card-stripe-form button{ width:100%; }
-  .card-stripe-form .card-error{ color:#e05a5a; font-size:12px; margin-top:6px; }
 </style>
-<script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
 
@@ -346,72 +331,6 @@ const STRIPE_CUSTOMER_KEY = 'atelier_stripe_customer';
 const STRIPE_PM_KEY = 'atelier_stripe_pm';
 const NOSHOW_CHARGED_KEY = 'atelier_noshow_charged';        // 'true' | absent
 const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c3: 'C3 (diesel)' };
-
-let chatMessages = [];
-let pendingCardCollection = null; // { eventId, presta, montantTTC, nom, numero } — rempli par create_appointment quand Stripe est configuré
-
-const PRESTATIONS_CATALOG = `
-- Mise à jour de la vanne EGR : 180€ TTC, 30 min de travail actif, occupe une demi-journée de planning, jusqu'à 3 en simultané par demi-journée
-- Mise à jour du FAP : 180€ TTC, ~30 min de travail actif, occupe une demi-journée, jusqu'à 3 en simultané par demi-journée
-- Mise à jour AdBlue : 350€ TTC, ~30 min de travail actif, occupe une demi-journée, jusqu'à 3 en simultané par demi-journée
-- Reprogrammation puissance, véhicule jusqu'à 2014 : 450€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
-- Reprogrammation puissance, véhicule 2015 à 2019 : 500€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
-- Reprogrammation puissance, véhicule 2020 à 2022 : 550€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
-- Reprogrammation puissance, véhicule 2022 à aujourd'hui : 600€ TTC, 1h de travail actif, occupe une journée complète, jusqu'à 3 en simultané par jour
-- Banc de puissance EN PLUS d'une reprog puissance (option, prix à additionner à la reprog) : +80€ TTC, +2 à 3h de travail actif en plus, jusqu'à 2 en simultané
-- Banc de puissance seul (sans reprog) : 120€ TTC, 1h de travail actif, occupe 3h, jusqu'à 2 en simultané
-- Contrôle du 5ème plein après conversion Flexfuel (suivi gratuit, à part) : 0€, 15 min de travail actif, occupe 30 min, 1 seul à la fois
-- Flexfuel (passage éthanol E85), 3 ou 4 cylindres : 690€ TTC, 1h de travail actif, garde le véhicule 24h (contrôle démarrage à froid), jusqu'à 2 en simultané
-- Flexfuel (passage éthanol E85), 5 cylindres : 790€ TTC, 1h de travail actif, garde le véhicule 24h, jusqu'à 2 en simultané
-- Flexfuel (passage éthanol E85), 6 cylindres : 990€ TTC, 1h de travail actif, garde le véhicule 24h, jusqu'à 2 en simultané
-- Flexfuel (passage éthanol E85), 8 ou 10 cylindres : 1190€ TTC, 1h de travail actif, garde le véhicule 24h, jusqu'à 2 en simultané
-- Diagnostic (valise multimarque) : 49€ TTC, 30 min de travail actif, intervention immédiate dans un créneau libre de l'agenda — ne bloque pas une demi-journée ou une journée entière comme les autres prestations, voir check_creneaux_diagnostic plus bas
-`.trim();
-
-const BOOKING_TOOLS = [
-  {
-    name: "check_availability",
-    description: "Renvoie, pour chaque jour de la plage demandée, le nombre de rendez-vous déjà pris et le chiffre d'affaires déjà engagé (TTC et HT estimés) — jamais les noms de clients, numéros ou détails des rendez-vous, qui restent confidentiels.",
-    input_schema: {
-      type: "object",
-      properties: {
-        date_debut: { type: "string", description: "Date de début au format AAAA-MM-JJ" },
-        date_fin: { type: "string", description: "Date de fin au format AAAA-MM-JJ" }
-      },
-      required: ["date_debut", "date_fin"]
-    }
-  },
-  {
-    name: "check_creneaux_diagnostic",
-    description: "Pour le Diagnostic uniquement (30 min, s'insère dans un trou de l'agenda plutôt que de bloquer une demi-journée) : renvoie, pour chaque jour ouvré de la plage demandée, la liste des créneaux réellement libres d'au moins 30 minutes pendant les horaires d'ouverture, calculés à partir des rendez-vous déjà à l'heure précise ce jour-là. N'utilise jamais check_availability pour un Diagnostic — utilise cet outil-ci, qui donne des créneaux précis plutôt qu'un simple statut de journée.",
-    input_schema: {
-      type: "object",
-      properties: {
-        date_debut: { type: "string", description: "Date de début au format AAAA-MM-JJ" },
-        date_fin: { type: "string", description: "Date de fin au format AAAA-MM-JJ" }
-      },
-      required: ["date_debut", "date_fin"]
-    }
-  },
-  {
-    name: "create_appointment",
-    description: "Crée le rendez-vous dans Google Agenda. À utiliser uniquement après confirmation explicite de l'utilisateur sur le véhicule, la date et l'heure.",
-    input_schema: {
-      type: "object",
-      properties: {
-        nom: { type: "string", description: "Nom du client" },
-        voiture: { type: "string", description: "Modèle du véhicule" },
-        presta: { type: "string", description: "Prestation demandée" },
-        numero: { type: "string", description: "Numéro de téléphone, si connu" },
-        date: { type: "string", description: "AAAA-MM-JJ" },
-        heure_debut: { type: "string", description: "HH:MM" },
-        heure_fin: { type: "string", description: "HH:MM" },
-        commentaire: { type: "string", description: "Précisions optionnelles" }
-      },
-      required: ["nom", "voiture", "numero", "date", "heure_debut", "heure_fin"]
-    }
-  }
-];
 
 let config = null;       // { workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled }
 let accessToken = null;
@@ -526,16 +445,10 @@ function renderSetup(){
       <input id="remoteWorkerUrl" placeholder="https://remote-tasks-api.xxxx.workers.dev" value="${config?.remoteWorkerUrl || ''}">
       <label>Clé d'accès dossiers à distance (optionnel)</label>
       <input id="remoteAccessKey" placeholder="la clé définie dans le Worker" value="${config?.remoteAccessKey || ''}">
-      <label>URL du relais assistant IA (optionnel)</label>
-      <input id="assistantWorkerUrl" placeholder="https://booking-assistant-api.xxxx.workers.dev" value="${config?.assistantWorkerUrl || ''}">
-      <label>Clé d'accès assistant IA (optionnel)</label>
-      <input id="assistantAccessKey" placeholder="la clé définie dans le Worker" value="${config?.assistantAccessKey || ''}">
-      <label>URL du relais paiements Stripe (optionnel — carte bancaire à la prise de RDV)</label>
+      <label>URL du relais paiements Stripe (optionnel — prélèvement en cas d'absence)</label>
       <input id="stripePaymentsWorkerUrl" placeholder="https://stripe-payments-api.xxxx.workers.dev" value="${config?.stripePaymentsWorkerUrl || ''}">
       <label>Clé d'accès paiements Stripe (optionnel)</label>
       <input id="stripePaymentsAccessKey" placeholder="la clé définie dans le Worker" value="${config?.stripePaymentsAccessKey || ''}">
-      <label>Clé publique Stripe (optionnel — commence par pk_)</label>
-      <input id="stripePublishableKey" placeholder="pk_live_..." value="${config?.stripePublishableKey || ''}">
       <label class="checkbox-row"><input type="checkbox" id="soundEnabled" ${config?.soundEnabled === false ? '' : 'checked'}> 🔊 Jouer un son à chaque changement (nouveau véhicule, statut modifié...)</label>
       <button class="primary" id="saveBtn">Enregistrer et continuer</button>
     </div>
@@ -545,14 +458,11 @@ function renderSetup(){
     const calendarId = document.getElementById('calendarId').value.trim();
     const remoteWorkerUrl = document.getElementById('remoteWorkerUrl').value.trim();
     const remoteAccessKey = document.getElementById('remoteAccessKey').value.trim();
-    const assistantWorkerUrl = document.getElementById('assistantWorkerUrl').value.trim();
-    const assistantAccessKey = document.getElementById('assistantAccessKey').value.trim();
     const stripePaymentsWorkerUrl = document.getElementById('stripePaymentsWorkerUrl').value.trim();
     const stripePaymentsAccessKey = document.getElementById('stripePaymentsAccessKey').value.trim();
-    const stripePublishableKey = document.getElementById('stripePublishableKey').value.trim();
     const soundEnabled = document.getElementById('soundEnabled').checked;
     if(!workerUrl || !calendarId) return;
-    await saveConfig({workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, assistantWorkerUrl, assistantAccessKey, stripePaymentsWorkerUrl, stripePaymentsAccessKey, stripePublishableKey, soundEnabled});
+    await saveConfig({workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, stripePaymentsWorkerUrl, stripePaymentsAccessKey, soundEnabled});
     init();
   };
 }
@@ -1117,70 +1027,8 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, c
   return created.id;
 }
 
-// ---------- Assistant IA de prise de rendez-vous ----------
-
-function openAssistantModal(){
-  if(!config.assistantWorkerUrl || !config.assistantAccessKey){
-    alert("L'assistant IA n'est pas encore configuré. Ouvre ⚙ pour renseigner son URL et sa clé.");
-    return;
-  }
-  chatMessages = [];
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
-    <div class="modal modal-assistant">
-      <h3>💬 Assistant de prise de rendez-vous</h3>
-      <div id="chatMessages" class="chat-messages">
-        <div class="chat-bubble assistant">Bienvenue dans l'assistant IA de AG Sport Reprog ! Je suis là pour vous conseiller et prendre votre rendez-vous.</div>
-      </div>
-      <div class="chat-input-row">
-        <input id="chatInput" placeholder="Ex : RDV suppression FAP sur une Clio, semaine prochaine">
-        <button id="chatSendBtn">Envoyer</button>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-cancel" id="closeChatBtn">Fermer</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
-  document.getElementById('closeChatBtn').onclick = () => overlay.remove();
-
-  const input = document.getElementById('chatInput');
-  const send = () => {
-    const val = input.value.trim();
-    if(!val) return;
-    input.value = '';
-    handleUserMessage(val);
-  };
-  document.getElementById('chatSendBtn').onclick = send;
-  input.addEventListener('keydown', (e) => { if(e.key === 'Enter') send(); });
-  input.focus();
-}
-
-function addChatBubble(role, text){
-  const el = document.getElementById('chatMessages');
-  if(!el) return;
-  const bubble = document.createElement('div');
-  bubble.className = `chat-bubble ${role}`;
-  bubble.textContent = text;
-  el.appendChild(bubble);
-  el.scrollTop = el.scrollHeight;
-}
-
-function addChatInfo(text){
-  const el = document.getElementById('chatMessages');
-  if(!el) return null;
-  const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble tool-info';
-  bubble.textContent = text;
-  el.appendChild(bubble);
-  el.scrollTop = el.scrollHeight;
-  return bubble;
-}
-
-// Estimation du prix (TTC) d'une prestation à partir de mots-clés dans le titre — fait ici en code,
-// jamais par l'assistant, pour ne jamais avoir à lui transmettre le titre brut (qui contient nom/téléphone/détails)
+// Estimation du prix (TTC) d'une prestation à partir de mots-clés dans le titre — utilisée par le
+// bouton "Absent" pour calculer le montant du prélèvement de 10% en cas de rendez-vous non honoré.
 const REVENUE_KEYWORDS = [
   { keywords: ['egr'], priceTTC: 180 },
   { keywords: ['fap'], priceTTC: 180 },
@@ -1208,417 +1056,6 @@ function estimateRevenueTTC(title){
     if(entry.keywords.some(k => t.includes(k))) total += entry.priceTTC;
   }
   return total;
-}
-
-// Affiche dans le chat le formulaire d'enregistrement de carte (empreinte bancaire, aucun débit)
-// une fois le RDV créé "en attente". Le RDV n'est confirmé QUE par le webhook Stripe côté serveur
-// une fois la carte réellement enregistrée avec succès — jamais depuis ce navigateur directement,
-// même en cas de succès apparent ici (même principe que pour tout le reste : ne jamais faire
-// confiance à une confirmation côté client pour de l'argent).
-async function showCardCollectionForm({eventId, presta, montantTTC, nom, numero}){
-  const el = document.getElementById('chatMessages');
-  if(!el) return;
-
-  const acompteTxt = montantTTC ? ` (soit environ ${(montantTTC * 0.10).toFixed(2)}€)` : '';
-  const wrap = document.createElement('div');
-  wrap.className = 'chat-bubble assistant';
-  wrap.innerHTML = `
-    <div class="card-stripe-form">
-      <div class="policy">🔒 Pour confirmer le rendez-vous, enregistrez la carte bancaire du client — aucun montant n'est débité maintenant. En cas de rendez-vous non honoré sans annulation au moins 24h avant, 10% du tarif${acompteTxt} pourra être prélevé.</div>
-      <div id="stripeCardElement"></div>
-      <button id="stripeSubmitBtn">Enregistrer la carte</button>
-      <div class="card-error" id="stripeCardError"></div>
-    </div>
-  `;
-  el.appendChild(wrap);
-  el.scrollTop = el.scrollHeight;
-  const errEl = () => wrap.querySelector('#stripeCardError');
-
-  if(typeof Stripe === 'undefined' || !config.stripePublishableKey){
-    errEl().textContent = "Le paiement n'est pas disponible pour le moment.";
-    return;
-  }
-
-  let clientSecret;
-  try{
-    const res = await fetchWithTimeout(config.stripePaymentsWorkerUrl, {
-      method: 'POST',
-      headers: { 'X-Auth-Key': config.stripePaymentsAccessKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create_setup_intent', eventId, nom, numero })
-    }, 20000);
-    const data = await res.json();
-    if(!res.ok || !data.client_secret) throw new Error(data.error || 'Erreur');
-    clientSecret = data.client_secret;
-  }catch(e){
-    errEl().textContent = "Impossible de préparer le paiement pour le moment. Contactez-nous au 07 69 37 70 92.";
-    return;
-  }
-
-  const stripe = Stripe(config.stripePublishableKey);
-  const elements = stripe.elements();
-  const cardElement = elements.create('card', { style: { base: { fontSize: '15px', color: '#1a1a1a' } } });
-  cardElement.mount(wrap.querySelector('#stripeCardElement'));
-
-  wrap.querySelector('#stripeSubmitBtn').onclick = async () => {
-    const btn = wrap.querySelector('#stripeSubmitBtn');
-    errEl().textContent = '';
-    btn.disabled = true;
-    btn.textContent = 'Enregistrement...';
-    const { error } = await stripe.confirmCardSetup(clientSecret, {
-      payment_method: { card: cardElement, billing_details: { name: nom || undefined } }
-    });
-    if(error){
-      errEl().textContent = error.message || "La carte n'a pas pu être enregistrée.";
-      btn.disabled = false;
-      btn.textContent = 'Enregistrer la carte';
-      return;
-    }
-    wrap.innerHTML = `<div class="card-stripe-form"><div class="policy">✅ Carte enregistrée, le rendez-vous est confirmé !</div></div>`;
-    el.scrollTop = el.scrollHeight;
-  };
-}
-
-async function executeTool(toolName, input){
-  if(toolName === 'check_availability'){
-    try{
-      const timeMin = new Date(input.date_debut + 'T00:00:00').toISOString();
-      const timeMax = new Date(input.date_fin + 'T23:59:59').toISOString();
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}&maxResults=250`;
-      const res = await authFetch(url);
-      if(!res.ok) return { error: "Impossible de consulter l'agenda." };
-      const data = await res.json();
-
-      // Une entrée pour CHAQUE jour de la plage (même totalement libre), pour que jour_semaine soit toujours fiable
-      const parJour = {};
-      let d = new Date(input.date_debut + 'T12:00:00');
-      const fin = new Date(input.date_fin + 'T12:00:00');
-      while(d <= fin){
-        const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        parJour[dateKey] = {
-          date: dateKey,
-          jour_semaine: d.toLocaleDateString('fr-FR', {weekday: 'long'}),
-          date_affichage: d.toLocaleDateString('fr-FR', {weekday: 'long', day: 'numeric', month: 'long'}),
-          nombre_rdv: 0,
-          nombre_rdv_montant_inconnu: 0,
-          chiffre_affaires_ttc_estime: 0
-        };
-        d.setDate(d.getDate() + 1);
-      }
-
-      (data.items || []).forEach(ev => {
-        const startRaw = ev.start?.dateTime || ev.start?.date;
-        const endRaw = ev.end?.dateTime || ev.end?.date;
-        const allDay = !ev.start?.dateTime;
-        const dateKey = (startRaw || '').slice(0, 10);
-        if(!dateKey) return;
-        const revenu = estimateRevenueTTC(ev.summary);
-
-        // RÈGLE DE COMPTAGE (définie par l'atelier) :
-        // - Rendez-vous de 24h ou moins (marge de sécurité jusqu'à 26h réelles — ex : Flexfuel, dépôt
-        //   un jour, récupération le lendemain, donc 2 jours calendaires dans Google Agenda même si
-        //   c'est ~24h réelles) : compté une seule fois, sur le jour de DÉPÔT uniquement (nombre_rdv
-        //   ET chiffre d'affaires complet) — même si le véhicule reste visible sur 2 jours dans
-        //   l'agenda. 2 jours calendaires couvrent bien jusqu'à 48h, largement assez de marge au-delà
-        //   des 26h réelles visées, donc ce seuil ne bascule jamais un Flexfuel classique par erreur.
-        // - Rendez-vous de plus de 26h réelles (3 jours calendaires ou plus, ex : une préparation
-        //   moteur qui s'étale sur plusieurs jours) : compté EN GLOBALITÉ — le chiffre d'affaires
-        //   total est DIVISÉ par le nombre de jours couverts et réparti à parts égales sur chacun
-        //   (ex : 1000€ sur 4 jours = 250€/jour), pour ne pas gonfler artificiellement le CA de
-        //   chaque jour avec le même montant répété en entier. La présence du véhicule (nombre_rdv),
-        //   elle, compte en entier chaque jour : ce n'est pas une question de part, une vraie place
-        //   est prise chaque jour, qu'importe la fraction de CA qui lui est associée.
-        const spanMs = (allDay && endRaw && startRaw) ? (new Date(endRaw) - new Date(startRaw)) : 0;
-        const spanJoursCalendaires = spanMs / (24 * 3600 * 1000);
-
-        if(allDay && spanJoursCalendaires > 2){
-          let d = new Date(startRaw + 'T00:00:00');
-          const endD = new Date(endRaw); // borne exclusive
-          const joursCouverts = Math.round(spanJoursCalendaires);
-          const revenuParJour = revenu / joursCouverts;
-          while(d < endD){
-            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            if(parJour[key]){
-              parJour[key].nombre_rdv += 1;
-              parJour[key].chiffre_affaires_ttc_estime += revenuParJour;
-              if(revenu === 0) parJour[key].nombre_rdv_montant_inconnu += 1;
-            }
-            d.setDate(d.getDate() + 1);
-          }
-        } else {
-          // 24h ou moins (y compris un Flexfuel classique sur 2 jours calendaires), ou rendez-vous
-          // classique à l'heure sur un seul jour : compté une seule fois, sur le jour de dépôt/début.
-          if(!parJour[dateKey]) return;
-          parJour[dateKey].nombre_rdv += 1;
-          parJour[dateKey].chiffre_affaires_ttc_estime += revenu;
-          if(revenu === 0) parJour[dateKey].nombre_rdv_montant_inconnu += 1;
-        }
-      });
-
-      const joursCalcules = Object.values(parJour).map(j => {
-        const ht = Math.round(j.chiffre_affaires_ttc_estime / 1.2);
-        // Statut calculé ici, pas par le modèle : au-delà de 1300€ HT, ou si au moins 4 rendez-vous
-        // de la journée ont un titre dont on ne reconnaît ni prix ni prestation (donc une valeur
-        // totalement inconnue — pas juste un rendez-vous déjà compté ailleurs), la journée est
-        // considérée complète. Entre 900 et 1300€ HT, il reste un peu de place mais on privilégie
-        // un autre jour si possible.
-        let statut_journee = 'libre';
-        if(ht >= 1300 || j.nombre_rdv_montant_inconnu >= 4) statut_journee = 'complet';
-        else if(ht >= 900) statut_journee = 'presque complet';
-        return {
-          date: j.date,
-          jour_semaine: j.jour_semaine,
-          date_affichage: j.date_affichage,
-          nombre_rdv: j.nombre_rdv,
-          chiffre_affaires_ttc_estime: j.chiffre_affaires_ttc_estime,
-          chiffre_affaires_ht_estime: ht,
-          statut_journee
-        };
-      }).sort((a, b) => a.date.localeCompare(b.date));
-
-      // Les jours "complet" ne sont JAMAIS transmis au modèle : une instruction ("ne propose jamais
-      // un jour complet"), même explicite et répétée, n'est pas fiable à 100 % — supprimer
-      // carrément la donnée est la seule garantie qu'il ne puisse pas les proposer par erreur.
-      const jours = joursCalcules.filter(j => j.statut_journee !== 'complet');
-      const nombreJoursComplets = joursCalcules.length - jours.length;
-      if(jours.length === 0){
-        return { jours: [], note: `Les ${nombreJoursComplets} jour(s) de cette plage sont tous complets. Rappelle check_availability avec une plage de dates plus tardive pour trouver un jour disponible.` };
-      }
-      return {
-        jours,
-        ...(nombreJoursComplets > 0 ? { jours_complets_non_affiches: nombreJoursComplets } : {})
-      }; // aucune donnée brute (ni nom, ni téléphone, ni titre) n'est jamais incluse ici — jour_semaine est toujours calculé ici, jamais à deviner
-    }catch(e){
-      return { error: "Erreur lors de la consultation de l'agenda." };
-    }
-  }
-  if(toolName === 'check_creneaux_diagnostic'){
-    // Contrairement à check_availability (statut par journée entière), ici on cherche de vrais
-    // trous horaires libres — utilisé uniquement pour le Diagnostic (30 min, s'insère n'importe où).
-    try{
-      const timeMin = new Date(input.date_debut + 'T00:00:00').toISOString();
-      const timeMax = new Date(input.date_fin + 'T23:59:59').toISOString();
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}&maxResults=250`;
-      const res = await authFetch(url);
-      if(!res.ok) return { error: "Impossible de consulter l'agenda." };
-      const data = await res.json();
-
-      // Horaires d'ouverture, en minutes depuis minuit (matin, après-midi)
-      const HORAIRES_SEMAINE = [[9 * 60 + 15, 12 * 60], [14 * 60, 18 * 60]]; // lundi-jeudi
-      const HORAIRES_VENDREDI = [[9 * 60 + 15, 12 * 60], [14 * 60, 17 * 60]];
-
-      const parJour = {};
-      let d = new Date(input.date_debut + 'T12:00:00');
-      const fin = new Date(input.date_fin + 'T12:00:00');
-      while(d <= fin){
-        const jourNum = d.getDay(); // 0 = dimanche, 6 = samedi
-        if(jourNum !== 0 && jourNum !== 6){
-          const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          parJour[dateKey] = {
-            date: dateKey,
-            jour_semaine: d.toLocaleDateString('fr-FR', {weekday: 'long'}),
-            date_affichage: d.toLocaleDateString('fr-FR', {weekday: 'long', day: 'numeric', month: 'long'}),
-            plages: (jourNum === 5 ? HORAIRES_VENDREDI : HORAIRES_SEMAINE).map(p => [...p]),
-            occupations: []
-          };
-        }
-        d.setDate(d.getDate() + 1);
-      }
-
-      // Seuls les rendez-vous À L'HEURE (dateTime précis) bloquent un créneau — les événements
-      // "journée entière" (Flexfuel, notes internes) n'ont pas d'horaire précis à respecter.
-      (data.items || []).forEach(ev => {
-        if(!ev.start?.dateTime || !ev.end?.dateTime) return;
-        const startD = new Date(ev.start.dateTime);
-        const endD = new Date(ev.end.dateTime);
-        const dateKey = `${startD.getFullYear()}-${String(startD.getMonth() + 1).padStart(2, '0')}-${String(startD.getDate()).padStart(2, '0')}`;
-        if(!parJour[dateKey]) return;
-        parJour[dateKey].occupations.push([
-          startD.getHours() * 60 + startD.getMinutes(),
-          endD.getHours() * 60 + endD.getMinutes()
-        ]);
-      });
-
-      const versHHMM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}h${String(m % 60).padStart(2, '0')}`;
-
-      const jours = Object.values(parJour).map(j => {
-        const creneaux_libres = [];
-        j.plages.forEach(([plageDebut, plageFin]) => {
-          const occPlage = j.occupations
-            .filter(([od, of_]) => of_ > plageDebut && od < plageFin)
-            .map(([od, of_]) => [Math.max(od, plageDebut), Math.min(of_, plageFin)])
-            .sort((a, b) => a[0] - b[0]);
-          let curseur = plageDebut;
-          occPlage.forEach(([od, of_]) => {
-            if(od - curseur >= 30) creneaux_libres.push({ debut: versHHMM(curseur), fin: versHHMM(od) });
-            curseur = Math.max(curseur, of_);
-          });
-          if(plageFin - curseur >= 30) creneaux_libres.push({ debut: versHHMM(curseur), fin: versHHMM(plageFin) });
-        });
-        return {
-          date: j.date,
-          jour_semaine: j.jour_semaine,
-          date_affichage: j.date_affichage,
-          creneaux_libres
-        };
-      }).filter(j => j.creneaux_libres.length > 0).sort((a, b) => a.date.localeCompare(b.date));
-
-      if(jours.length === 0){
-        return { jours: [], note: "Aucun créneau libre d'au moins 30 minutes trouvé dans cette plage. Rappelle check_creneaux_diagnostic avec une plage de dates plus tardive." };
-      }
-      return { jours };
-    }catch(e){
-      return { error: "Erreur lors de la consultation de l'agenda." };
-    }
-  }
-  if(toolName === 'create_appointment'){
-    // Le "required" du schéma garantit seulement que le champ existe dans l'appel, pas qu'il
-    // contient une vraie valeur (une chaîne vide passerait) — vérification explicite ici, qui
-    // bloque réellement la création si le nom ou le numéro manquent.
-    if(!input.nom || !input.nom.trim() || !input.numero || !input.numero.trim()){
-      return { succes: false, message: "Le nom et le numéro de téléphone du client sont obligatoires avant de créer le rendez-vous — demande-les au client s'ils manquent, puis réessaie." };
-    }
-    // Flexfuel garde le véhicule 24h (contrôle du démarrage à froid) : le rendez-vous doit occuper
-    // 2 jours calendaires même si le travail actif ne dure qu'environ 1h le jour du dépôt — la garde,
-    // pas le temps d'intervention, détermine la place prise. On le détecte automatiquement plutôt que
-    // de laisser le modèle calculer une date de fin lui-même.
-    const prestaLower = (input.presta || '').toLowerCase();
-    const isFlexfuel = /flexfuel|ethanol|éthanol|e85/.test(prestaLower);
-    let commentaire = input.commentaire || '';
-    let isMultiDay = false, endDate = '';
-    if(isFlexfuel){
-      isMultiDay = true;
-      const fin = new Date(input.date + 'T00:00:00');
-      fin.setDate(fin.getDate() + 1);
-      endDate = `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, '0')}-${String(fin.getDate()).padStart(2, '0')}`;
-      if(input.heure_debut) commentaire = `Dépôt véhicule vers ${input.heure_debut}.${commentaire ? ' ' + commentaire : ''}`;
-    }
-    const eventId = await createCalendarEvent({
-      nom: input.nom || '', voiture: input.voiture || '', presta: input.presta || '',
-      numero: input.numero || '', commentaire, courtesy: '',
-      date: input.date, startTime: input.heure_debut, endTime: input.heure_fin,
-      isMultiDay, endDate
-    });
-    if(!eventId) return { succes: false, message: "Échec de la création du rendez-vous." };
-
-    // Empreinte bancaire (carte enregistrée, rien débité) : si Stripe est configuré, le RDV est
-    // créé "en attente" et n'est confirmé QUE par le webhook Stripe une fois la carte enregistrée —
-    // jamais depuis le navigateur du client directement. Tant que Stripe n'est pas configuré, on
-    // garde l'ancien comportement (RDV confirmé immédiatement, sans carte).
-    const paiementActif = !!(config.stripePaymentsWorkerUrl && config.stripePublishableKey);
-    if(paiementActif){
-      await patchPrivateProps(eventId, {
-        [PAYMENT_STATUS_KEY]: 'en_attente',
-        [PAYMENT_CREATED_AT_KEY]: new Date().toISOString()
-      });
-      pendingCardCollection = {
-        eventId,
-        presta: input.presta || '',
-        montantTTC: estimateRevenueTTC(input.presta || ''),
-        nom: input.nom || '', numero: input.numero || ''
-      };
-    }
-    return {
-      succes: true,
-      message: paiementActif
-        ? "Rendez-vous créé, en attente d'enregistrement de la carte bancaire du client (aucun débit, juste une empreinte)."
-        : "Rendez-vous créé et confirmé avec succès."
-    };
-  }
-  return { error: "Outil inconnu." };
-}
-
-async function callAssistant(){
-  const now = new Date();
-  const todayStr = now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
-  const todayISO = now.toISOString().slice(0, 10);
-  const body = {
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    system: `Tu es l'assistant de prise de rendez-vous de l'atelier AG Sport Reprog (reprogrammation moteur). Nous sommes aujourd'hui le ${todayStr} (${todayISO} au format AAAA-MM-JJ) — utilise toujours cette date comme référence pour comprendre les demandes relatives ("demain", "la semaine prochaine", "vendredi prochain", etc.), ne te base jamais sur une autre date que celle-ci.
-
-DÉMARCHE COMMERCIALE : la toute première fois que tu présentes une prestation à un client (quand il décrit son véhicule et son besoin), ne commence JAMAIS ta réponse par le prix. Présente d'abord ce que la prestation apporte concrètement — ce qui est inclus, le soin apporté, le bénéfice pour son véhicule (ex : pour un Flexfuel, la cartographie développée spécifiquement pour SON véhicule et non un fichier générique, le contrôle de démarrage à froid, le contrôle gratuit après le 5ème plein) — donne-lui une vraie raison d'avoir envie de la prestation avant de parler chiffres. Annonce ensuite le tarif dans la foulée, toujours dans le même message : il ne s'agit pas de cacher le prix ni de le faire attendre plusieurs échanges, juste de ne pas ouvrir sur le chiffre en toute première phrase.
-
-HORAIRES D'OUVERTURE : du lundi au jeudi de 9h15 à 12h00 et de 14h00 à 18h00, le vendredi de 9h15 à 12h00 et de 14h00 à 17h00, fermé le samedi et le dimanche. Ne propose et ne crée jamais un rendez-vous en dehors de ces horaires ou un jour de fermeture — si l'utilisateur demande un créneau hors horaires, explique-le-lui et propose le créneau valide le plus proche.
-
-CATALOGUE DES PRESTATIONS (prix, temps de travail actif, occupation du planning, capacité en simultané) :
-${PRESTATIONS_CATALOG}
-
-IMPORTANT : le "temps de travail actif" indiqué ci-dessus (ex : "30 min", "1h") est une donnée strictement interne, réservée à ton propre calcul de capacité — ne la communique JAMAIS au client, même reformulée. Face au client, reprends uniquement l'information "occupe..." du catalogue pour CETTE prestation précise — "une demi-journée" pour l'EGR/le FAP/l'AdBlue, "une journée complète" pour la reprogrammation puissance, "24h" pour un Flexfuel (le véhicule reste toute une journée et une nuit pour le contrôle du démarrage à froid) — ne dis jamais "demi-journée" pour un Flexfuel ni pour une reprog puissance, et ne détaille jamais "matin" ou "après-midi" avec des horaires précis (ex : jamais "9h15-12h00" ou "14h00-18h00"). CAS PARTICULIER DU FLEXFUEL, à respecter à la lettre : ce n'est ni une demi-journée ni un rendez-vous "du matin" ou "de l'après-midi" — le véhicule reste 24h quelle que soit l'heure de dépôt, donc ne propose JAMAIS un choix entre un créneau du matin et un créneau de l'après-midi pour un Flexfuel. Demande uniquement à quelle heure le client peut déposer son véhicule ce jour-là (une seule heure, dans les horaires d'ouverture) — dis par exemple littéralement "à quelle heure pouvez-vous déposer votre véhicule mardi ?", jamais "le matin (9h15-12h00) ou l'après-midi (14h00-18h00)". Ne propose jamais non plus une longue liste de créneaux sur plusieurs jours ou semaines d'un coup : propose 2 ou 3 dates qui te semblent les plus pertinentes, laisse l'utilisateur réagir, et affine ensuite. C'est plus clair pour lui et plus naturel dans une conversation.
-
-VOCABULAIRE : ne jamais utiliser le mot "suppression" pour l'EGR, le FAP ou l'AdBlue, même si le client l'emploie lui-même — toujours dire "mise à jour" (ex : "mise à jour de la vanne EGR", "mise à jour du FAP", "mise à jour AdBlue"), y compris dans les messages de confirmation et dans les rendez-vous créés.
-
-Pour toute demande hors de ce catalogue (boîtier de programmation, voiture de course, Stage 2 ou 3, traceur GPS, alarme, ou tout conseil spécifique), NE PROPOSE PAS de rendez-vous automatique : dis à l'utilisateur de nous contacter directement au 07 69 37 70 92.
-
-CLIENT AVEC UN PROBLÈME NON IDENTIFIÉ : si le client décrit un symptôme ou un souci sur son véhicule sans savoir exactement de quoi il s'agit (bruit anormal, voyant allumé, perte de puissance, démarrage difficile, etc.), aide-le un maximum : pose-lui les questions pertinentes pour mieux cerner le problème, partage les pistes utiles que tu peux avoir, mais ne pose jamais de diagnostic définitif ni ne promets un résultat sans avoir vu le véhicule. Oriente-le naturellement vers le Diagnostic (valise multimarque), justement fait pour identifier précisément une panne.
-
-DIAGNOSTIC — OUTIL DÉDIÉ : pour cette prestation uniquement, n'utilise JAMAIS check_availability. Utilise check_creneaux_diagnostic, qui renvoie pour chaque jour la liste de vrais créneaux libres (ex : {"debut": "16h30", "fin": "18h00"}) calculés à partir des rendez-vous déjà à l'heure précise ce jour-là — pas un simple statut de journée. Comme le Diagnostic ne dure que 30 minutes et s'insère dans n'importe quel creneau_libre trouvé, tu peux le proposer même un jour par ailleurs chargé ou complet pour les autres prestations : ce sont deux logiques différentes.
-
-OBJECTIF DE CHIFFRE D'AFFAIRES JOURNALIER : vise entre 900€ et 1300€ HT de rendez-vous par jour. Cet objectif concerne les prestations classiques (via check_availability) — il ne s'applique pas au Diagnostic, qui suit sa propre logique de créneaux libres ci-dessus. check_availability te donne directement, pour chaque jour DISPONIBLE de la plage demandée (les jours complets ne te sont jamais transmis — voir plus bas), sa date, son jour de la semaine (jour_semaine), une chaîne déjà assemblée prête à l'emploi (date_affichage, ex : "jeudi 24 septembre"), le nombre de rendez-vous (nombre_rdv), le chiffre d'affaires déjà estimé (TTC et HT), et un statut déjà calculé (statut_journee) qui vaut "libre" ou "presque complet". RÈGLE ABSOLUE SUR LES DATES : quand tu mentionnes une date au client dans ta réponse, recopie TOUJOURS littéralement et telle quelle la valeur date_affichage correspondante fournie par check_availability (ex : si date_affichage vaut "jeudi 24 septembre", écris exactement "jeudi 24 septembre") — ne recompose JAMAIS toi-même l'association jour+date à partir de tes propres connaissances ou de la valeur date seule, même si tu es sûr de toi : les modèles de langage se trompent très souvent sur ce calcul de calendrier, et une erreur ici induit directement le client en erreur sur le bon jour. DISPONIBILITÉ : les jours complets sont déjà retirés de la liste jours par le système — tu ne peux donc proposer QUE des jours qui s'y trouvent, ce qui garantit que tu ne proposes jamais un jour déjà plein. Parmi les jours restants, propose en priorité ceux au statut "libre" avant ceux au statut "presque complet" (mais les deux restent des propositions valables, contrairement à un jour complet qui n'apparaît de toute façon plus dans la liste). Si le champ jours_complets_non_affiches est présent, ça t'indique juste que d'autres jours existent dans la plage mais sont déjà pris, sans plus de détail — inutile de le mentionner au client sauf s'il demande pourquoi tu ne proposes pas telle date précise. Si la liste jours est vide et qu'un champ note est présent, ça signifie que TOUTE la plage demandée est complète : rappelle immédiatement check_availability avec une plage de dates qui commence plus tard, plutôt que d'inventer une date ou de dire au client qu'il n'y a aucune place du tout.
-
-IMPORTANT — POURQUOI LE FILET DE SÉCURITÉ EXISTE : le chiffre d'affaires estimé peut être imprécis pour d'anciens rendez-vous dont le titre ne contient aucun mot-clé reconnu et aucun montant explicite (il ressort alors à 0€ alors que le véhicule occupe bel et bien une vraie place) — c'est pour ça que statut_journee ne se base pas seulement sur le chiffre d'affaires mais tient aussi compte du nombre de rendez-vous dont la valeur est totalement inconnue ce jour-là : tu n'as rien à recalculer, contente-toi de suivre statut_journee comme indiqué plus haut.
-
-Si l'utilisateur insiste pour un créneau plus rapide que ce que tu peux proposer dans ces conditions, dis-lui de nous appeler directement au 07 69 37 70 92 plutôt que de forcer un rendez-vous.
-
-CONFIDENTIALITÉ : les données que tu reçois de check_availability ne contiennent déjà aucun nom, numéro ou détail de client — seulement des chiffres par jour. Ne mentionne donc jamais rien de tel, ces informations ne te sont de toute façon jamais transmises.
-
-TON COMMERCIAL : quand quelqu'un demande un tarif, ne te contente pas de l'annoncer sèchement, mais reste concentré sur la prestation demandée — ne récite pas systématiquement les tarifs des autres prestations du catalogue si ce n'est pas pertinent ou pas demandé (l'exception : proposer le banc de puissance en complément d'une reprog puissance, qui est une combinaison naturelle). Mets plutôt en avant la valeur concrète de la prestation demandée. Pour une conversion éthanol (Flexfuel), insiste sur : le plein d'éthanol est fait sur place et inclus, la cartographie moteur est développée sur place spécifiquement pour le véhicule (pas un fichier générique), un test de démarrage à froid est réalisé pendant les 24h de garde du véhicule, et un contrôle gratuit est prévu après le 5ème plein pour vérifier l'adaptation. Reste chaleureux et engageant, et oriente doucement la conversation vers la prise de rendez-vous plutôt que de laisser l'échange s'arrêter net — sans jamais être insistant ou pressant si la personne veut juste se renseigner.
-
-Aide l'utilisateur à choisir un créneau et à préparer un rendez-vous. Utilise check_availability pour voir ce qui est déjà pris avant de proposer un horaire — appelle-le UNE SEULE FOIS avec une plage large (au moins 10 à 14 jours à partir d'aujourd'hui), plutôt que de vérifier les jours un par un avec plusieurs appels successifs : ça te donne tout ce qu'il faut pour raisonner en un coup, et c'est beaucoup plus rapide pour l'utilisateur qui attend. N'utilise create_appointment qu'après confirmation claire de l'utilisateur sur le véhicule, la date et l'heure — ET après avoir obtenu son NOM et son NUMÉRO DE TÉLÉPHONE, tous deux obligatoires (le système refuse la création sans ces deux informations). Si le client ne les a pas encore donnés spontanément, demande-les avant de créer le rendez-vous — ne le crée jamais "provisoirement" en espérant les récupérer après. Pour un Flexfuel, heure_debut correspond à l'heure de dépôt du véhicule : la garde de 24h qui suit (jusqu'au lendemain) est ajoutée automatiquement par le système, tu n'as rien à calculer toi-même pour la date de fin. Réponds en français, de façon naturelle et concise.`,
-    messages: chatMessages,
-    tools: BOOKING_TOOLS
-  };
-  try{
-    const res = await fetchWithTimeout(config.assistantWorkerUrl, {
-      method: 'POST',
-      headers: { 'X-Auth-Key': config.assistantAccessKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }, 30000);
-    if(!res.ok) return null;
-    return await res.json();
-  }catch(e){
-    return null;
-  }
-}
-
-async function handleUserMessage(text){
-  addChatBubble('user', text);
-  chatMessages.push({ role: 'user', content: text });
-  await runAssistantTurn(0);
-}
-
-async function runAssistantTurn(turnCount = 0){
-  if(turnCount >= 2){
-    addChatInfo("Je n'arrive pas à conclure automatiquement — contacte-nous directement au 07 69 37 70 92 pour ton rendez-vous.");
-    return;
-  }
-  const loadingBubble = addChatInfo('...réflexion...');
-  const data = await callAssistant();
-  if(loadingBubble) loadingBubble.remove();
-
-  if(!data || !data.content){
-    addChatInfo("L'assistant est momentanément indisponible, réessaie dans un instant.");
-    return;
-  }
-
-  chatMessages.push({ role: 'assistant', content: data.content });
-
-  data.content.filter(b => b.type === 'text').forEach(b => addChatBubble('assistant', b.text));
-
-  const toolUses = data.content.filter(b => b.type === 'tool_use');
-  if(toolUses.length > 0){
-    if(toolUses.some(tu => tu.name === 'create_appointment')) addChatInfo('📅 Création du rendez-vous...');
-    if(toolUses.some(tu => tu.name === 'check_availability')) addChatInfo('🔍 Vérification de l\'agenda...');
-    pendingCardCollection = null;
-    const results = await Promise.all(toolUses.map(tu => executeTool(tu.name, tu.input)));
-    const toolResults = toolUses.map((tu, i) => ({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(results[i]) }));
-    if(toolUses.some((tu, i) => tu.name === 'create_appointment' && results[i].succes)) fetchEvents();
-    chatMessages.push({ role: 'user', content: toolResults });
-    await runAssistantTurn(turnCount + 1);
-    // Une fois que l'assistant a fini de répondre (donc après son dernier message dans le chat), on
-    // affiche le formulaire de carte s'il y en a un en attente — pour qu'il arrive après le texte,
-    // jamais avant ou pendant.
-    if(pendingCardCollection) showCardCollectionForm(pendingCardCollection);
-  }
 }
 
 async function openNewEventModal(){
@@ -2238,7 +1675,6 @@ function renderList(){
         }
         <button id="searchBtn">🔍 Rechercher</button>
         <button id="newEventBtn">+ Nouveau RDV</button>
-        <button id="assistantBtn">💬 Assistant IA</button>
         <button id="refreshBtn">↻ Actualiser</button>
         <button id="scanMailBtn">📧 Vérifier les mails</button>
         <button id="slaveRecapBtn">📋 Récap du mois</button>
@@ -2268,7 +1704,6 @@ function renderList(){
   document.getElementById('slaveRecapBtn').onclick = printMonthlyRemoteTasksRecap;
   document.getElementById('searchBtn').onclick = openSearchModal;
   document.getElementById('newEventBtn').onclick = openNewEventModal;
-  document.getElementById('assistantBtn').onclick = openAssistantModal;
   document.getElementById('settingsBtn').onclick = renderSetup;
   document.querySelectorAll('.cours-btn').forEach(el => {
     el.onclick = () => {
