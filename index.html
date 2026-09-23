@@ -579,6 +579,25 @@ function mapEvent(ev){
 
 // ---------- Dossiers à distance (mails avec fichier à traiter) ----------
 
+let scanningGmail = false; // empêche deux scans Gmail de tourner en même temps (cause des doublons)
+
+// Fusionne les dossiers en double (même id = même mail) qui ont pu être créés par un scan lancé
+// deux fois en parallèle ou par deux appareils (PC/tablette) — garde le statut le plus avancé et
+// le commentaire non vide s'il y en a un.
+function dedupeRemoteTasks(tasks){
+  const priorite = { done: 3, cours: 2, paused: 1, '': 0 };
+  const parId = new Map();
+  for(const t of tasks){
+    const existant = parId.get(t.id);
+    if(!existant){ parId.set(t.id, t); continue; }
+    const fusion = { ...existant };
+    if((priorite[t.status] || 0) > (priorite[existant.status] || 0)) fusion.status = t.status;
+    if(!fusion.comment && t.comment) fusion.comment = t.comment;
+    parId.set(t.id, fusion);
+  }
+  return [...parId.values()];
+}
+
 async function fetchRemoteTasks(){
   if(!config.remoteWorkerUrl || !config.remoteAccessKey){
     console.warn('[dossiers à distance] non configuré (URL ou clé manquante)');
@@ -590,7 +609,7 @@ async function fetchRemoteTasks(){
       console.error('[dossiers à distance] fetchRemoteTasks: réponse HTTP', res.status, await res.text().catch(()=>''));
       return;
     }
-    remoteTasks = await res.json();
+    remoteTasks = dedupeRemoteTasks(await res.json());
     console.log('[dossiers à distance] tâches chargées :', remoteTasks.length);
     renderList();
   }catch(e){
@@ -652,6 +671,11 @@ async function scanGmailForNewTasks(){
     console.warn('[dossiers à distance] scan Gmail ignoré : non configuré');
     return;
   }
+  if(scanningGmail){
+    console.log('[dossiers à distance] scan déjà en cours, on ignore ce déclenchement');
+    return;
+  }
+  scanningGmail = true;
   console.log('[dossiers à distance] scan Gmail en cours...');
   try{
     const fromQuery = REMOTE_SENDERS.map(e => `from:${e}`).join(' OR ');
@@ -699,6 +723,7 @@ async function scanGmailForNewTasks(){
       console.log('[dossiers à distance] fiche ajoutée :', parsed.subject);
     }
     if(addedAny){
+      remoteTasks = dedupeRemoteTasks(remoteTasks); // filet de sécurité final avant l'enregistrement
       remoteTasks.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
       await saveRemoteTasksToServer();
       playChime();
@@ -706,21 +731,23 @@ async function scanGmailForNewTasks(){
     }
   }catch(e){
     console.error('[dossiers à distance] scanGmailForNewTasks a échoué :', e);
+  }finally{
+    scanningGmail = false;
   }
 }
 
 function setRemoteStatus(id, status){
-  const t = remoteTasks.find(x => x.id === id);
-  if(!t) return;
-  t.status = status;
+  const matches = remoteTasks.filter(x => x.id === id); // met à jour toutes les fiches avec cet id (au cas où un doublon résiduel traîne encore)
+  if(matches.length === 0) return;
+  matches.forEach(t => t.status = status);
   saveRemoteTasksToServer();
   renderList();
 }
 
 function setRemoteComment(id, comment){
-  const t = remoteTasks.find(x => x.id === id);
-  if(!t) return;
-  t.comment = comment;
+  const matches = remoteTasks.filter(x => x.id === id);
+  if(matches.length === 0) return;
+  matches.forEach(t => t.comment = comment);
   saveRemoteTasksToServer();
   renderList();
 }
