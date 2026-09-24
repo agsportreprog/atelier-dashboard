@@ -332,6 +332,30 @@ const STRIPE_PM_KEY = 'atelier_stripe_pm';
 const NOSHOW_CHARGED_KEY = 'atelier_noshow_charged';        // 'true' | absent
 const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c3: 'C3 (diesel)' };
 
+// Renvoie l'ensemble des véhicules de courtoisie déjà prêtés sur au moins un jour de la plage
+// [dateFrom, dateTo] (AAAA-MM-JJ) — sert à ne pas proposer une voiture déjà partie ce jour-là.
+// excludeId permet d'ignorer le rendez-vous en cours d'édition (pour ne pas se bloquer soi-même).
+function getBusyCourtesyKeys(dateFrom, dateTo, excludeId){
+  const from = new Date(dateFrom + 'T00:00:00');
+  const to = new Date((dateTo || dateFrom) + 'T23:59:59');
+  const busy = new Set();
+  events.forEach(ev => {
+    if(!ev.courtesyCar || ev.id === excludeId) return;
+    if(ev.startD <= to && ev.endD >= from) busy.add(ev.courtesyCar);
+  });
+  return busy;
+}
+
+function buildCourtesyOptionsHtml(busyKeys, current){
+  const noneOpt = `<option value="" ${!current ? 'selected' : ''}>Aucun</option>`;
+  const carOpts = Object.entries(COURTESY_CARS).map(([key, label]) => {
+    const busy = busyKeys.has(key) && key !== current; // si c'est la voiture déjà assignée à CE rdv, elle reste choisissable
+    const text = busy ? `🚫 ${label} — déjà prêtée ce jour` : label;
+    return `<option value="${key}" ${current === key ? 'selected' : ''} ${busy ? 'disabled' : ''}>${text}</option>`;
+  }).join('');
+  return noneOpt + carOpts;
+}
+
 let config = null;       // { workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled }
 let accessToken = null;
 let events = [];
@@ -986,10 +1010,11 @@ function setCourtesyCar(id, value){
 function openCourtesyModal(id, current){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  const optionsHtml = [`<option value="" ${!current ? 'selected' : ''}>Aucun</option>`]
-    .concat(Object.entries(COURTESY_CARS).map(([key, label]) =>
-      `<option value="${key}" ${current === key ? 'selected' : ''}>${label}</option>`
-    )).join('');
+  const ev = events.find(e => e.id === id);
+  const dateFrom = ev ? ev.startD.toISOString().slice(0, 10) : null;
+  const dateTo = ev ? ev.endD.toISOString().slice(0, 10) : null;
+  const busyKeys = dateFrom ? getBusyCourtesyKeys(dateFrom, dateTo, id) : new Set();
+  const optionsHtml = buildCourtesyOptionsHtml(busyKeys, current);
   overlay.innerHTML = `
     <div class="modal">
       <h3>Véhicule de courtoisie</h3>
@@ -1085,6 +1110,31 @@ function estimateRevenueTTC(title){
   return total;
 }
 
+// Calcule le jour et l'heure de remise suggérés pour un véhicule gardé plusieurs jours : dépôt
+// avant 15h30 -> prêt le jour ouvré suivant à 10:15. Dépôt à 15h30 ou après -> prêt le jour ouvré
+// suivant à l'heure de fermeture de ce jour-là (le travail se fait alors le lendemain). Si le jour
+// suivant tombe un samedi/dimanche, avance jusqu'au prochain jour ouvré. Juste une suggestion pour
+// pré-remplir le champ — reste librement modifiable à la main.
+function calculerRemiseSuggeree(dateDepotStr, heureDepot){
+  const [h, m] = (heureDepot || '00:00').split(':').map(Number);
+  const minutesDepot = (h || 0) * 60 + (m || 0);
+  const SEUIL = 15 * 60 + 30; // 15h30
+  const FERMETURE = { 1: 18 * 60, 2: 18 * 60, 3: 18 * 60, 4: 18 * 60, 5: 17 * 60 }; // lun-jeu 18h, ven 17h
+
+  let d = new Date(dateDepotStr + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  while(d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); // saute samedi/dimanche
+
+  let heureRemise;
+  if(minutesDepot < SEUIL){
+    heureRemise = '10:15';
+  } else {
+    const fermetureMin = FERMETURE[d.getDay()] || 18 * 60;
+    heureRemise = `${String(Math.floor(fermetureMin / 60)).padStart(2, '0')}:${String(fermetureMin % 60).padStart(2, '0')}`;
+  }
+  return heureRemise;
+}
+
 async function openNewEventModal(){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -1142,6 +1192,14 @@ async function openNewEventModal(){
               <label>Jusqu'au (dernier jour inclus)</label>
               <input id="newEndDate" type="date" value="${today}">
             </div>
+            <div class="field">
+              <label>Heure d'arrivée (optionnel)</label>
+              <input id="newMultiArrival" type="time">
+            </div>
+            <div class="field">
+              <label>Heure de départ prévue (optionnel)</label>
+              <input id="newMultiDeparture" type="time">
+            </div>
           </div>
 
           <div class="field">
@@ -1150,10 +1208,7 @@ async function openNewEventModal(){
           </div>
           <div class="field">
             <label>Véhicule de courtoisie prêté</label>
-            <select id="newCourtesy">
-              <option value="">Aucun</option>
-              ${Object.entries(COURTESY_CARS).map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}
-            </select>
+            <select id="newCourtesy">${buildCourtesyOptionsHtml(getBusyCourtesyKeys(today, today), '')}</select>
           </div>
         </div>
         <div class="newevent-right">
@@ -1292,7 +1347,29 @@ async function openNewEventModal(){
   document.getElementById('newMultiDay').addEventListener('change', (e) => {
     document.getElementById('singleDayFields').style.display = e.target.checked ? 'none' : '';
     document.getElementById('multiDayFields').style.display = e.target.checked ? '' : 'none';
+    refreshCourtesyAvailability();
   });
+
+  function refreshCourtesyAvailability(){
+    const sel = document.getElementById('newCourtesy');
+    const currentValue = sel.value;
+    const isMulti = document.getElementById('newMultiDay').checked;
+    const dateFrom = document.getElementById('newDate').value;
+    const dateTo = isMulti ? document.getElementById('newEndDate').value : dateFrom;
+    if(!dateFrom) return;
+    sel.innerHTML = buildCourtesyOptionsHtml(getBusyCourtesyKeys(dateFrom, dateTo), currentValue);
+  }
+  document.getElementById('newDate').addEventListener('change', refreshCourtesyAvailability);
+  document.getElementById('newEndDate').addEventListener('change', refreshCourtesyAvailability);
+
+  function suggererHeureDepart(){
+    const dateDepot = document.getElementById('newDate').value;
+    const heureDepot = document.getElementById('newMultiArrival').value;
+    if(!dateDepot || !heureDepot) return;
+    document.getElementById('newMultiDeparture').value = calculerRemiseSuggeree(dateDepot, heureDepot);
+  }
+  document.getElementById('newMultiArrival').addEventListener('change', suggererHeureDepart);
+  document.getElementById('newDate').addEventListener('change', suggererHeureDepart);
 
   renderMiniCal();
   renderDayAgenda();
@@ -1348,13 +1425,15 @@ async function openNewEventModal(){
     const voiture = document.getElementById('newVoiture').value.trim();
     const presta = document.getElementById('newPresta').value.trim();
     const numero = document.getElementById('newNumero').value.trim();
-    const commentaire = document.getElementById('newComment').value.trim();
+    let commentaire = document.getElementById('newComment').value.trim();
     const courtesy = document.getElementById('newCourtesy').value;
     const date = document.getElementById('newDate').value;
     const isMultiDay = document.getElementById('newMultiDay').checked;
     const startTime = document.getElementById('newStartTime').value;
     const endTime = document.getElementById('newEndTime').value;
     const endDate = document.getElementById('newEndDate').value;
+    const multiArrival = document.getElementById('newMultiArrival').value;
+    const multiDeparture = document.getElementById('newMultiDeparture').value;
     if(!nom || !voiture || !date){
       alert('Renseigne au moins le nom, la voiture et la date.');
       return;
@@ -1366,6 +1445,15 @@ async function openNewEventModal(){
     if(!isMultiDay && (!startTime || !endTime)){
       alert('Renseigne les horaires de début et de fin.');
       return;
+    }
+    if(isMultiDay && (multiArrival || multiDeparture)){
+      // L'événement reste "journée entière" dans l'agenda (aucun changement pour le calcul de
+      // disponibilité ailleurs) — les heures précises sont juste notées dans le commentaire.
+      const notes = [];
+      if(multiArrival) notes.push(`Dépôt à ${multiArrival}`);
+      if(multiDeparture) notes.push(`récupération prévue à ${multiDeparture}`);
+      const noteHoraires = notes.join(', ') + '.';
+      commentaire = commentaire ? `${noteHoraires} ${commentaire}` : noteHoraires;
     }
     const saveBtn = document.getElementById('saveNewEvent');
     saveBtn.disabled = true;
