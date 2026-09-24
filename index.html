@@ -1044,6 +1044,70 @@ function openCourtesyModal(id, current){
   };
 }
 
+async function openEmpreinteModal(id, nom){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Empreinte bancaire</h3>
+      <div class="field"><label>Génération du lien Stripe...</label></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelEmpreinte">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelEmpreinte').onclick = () => overlay.remove();
+
+  try{
+    const res = await fetchWithTimeout(config.stripePaymentsWorkerUrl, {
+      method: 'POST',
+      headers: { 'X-Auth-Key': config.stripePaymentsAccessKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_checkout_session', eventId: id, nom })
+    }, 20000);
+    const data = await res.json();
+    if(!res.ok || !data.url) throw new Error(data.error || 'Erreur');
+
+    await patchPrivateProps(id, {
+      [PAYMENT_STATUS_KEY]: 'en_attente',
+      [PAYMENT_CREATED_AT_KEY]: new Date().toISOString()
+    });
+
+    if(!document.body.contains(overlay)) return; // fermée entre-temps
+    overlay.querySelector('.modal').innerHTML = `
+      <h3>Empreinte bancaire</h3>
+      <div class="field">
+        <label>Lien à envoyer au client (SMS, mail, WhatsApp...) ou à ouvrir directement</label>
+        <input id="empreinteLink" type="text" readonly value="${data.url}" onclick="this.select()">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="copyEmpreinte">📋 Copier le lien</button>
+        <button class="btn-save" id="openEmpreinte">Ouvrir ici</button>
+      </div>
+    `;
+    document.getElementById('copyEmpreinte').onclick = () => {
+      navigator.clipboard.writeText(data.url).then(() => {
+        document.getElementById('copyEmpreinte').textContent = '✓ Copié';
+      });
+    };
+    document.getElementById('openEmpreinte').onclick = () => {
+      window.open(data.url, '_blank');
+      overlay.remove();
+      fetchEvents();
+    };
+    fetchEvents(); // pour faire apparaître le badge "en attente" tout de suite
+  }catch(e){
+    if(!document.body.contains(overlay)) return;
+    overlay.querySelector('.modal').innerHTML = `
+      <h3>Empreinte bancaire</h3>
+      <div class="field"><label style="color:#e05a5a;">Échec de la génération du lien. Vérifie la configuration Stripe dans ⚙.</label></div>
+      <div class="modal-actions"><button class="btn-cancel" id="cancelEmpreinte2">Fermer</button></div>
+    `;
+    document.getElementById('cancelEmpreinte2').onclick = () => overlay.remove();
+  }
+}
+
 async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate}){
   const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
   let summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
@@ -1745,6 +1809,10 @@ function renderList(){
                 <div class="comment-btn courtesy-edit-btn" data-id="${ev.id}" data-current="${encodeURIComponent(ev.courtesyCar || '')}">
                   ${ev.courtesyCar ? '🚗 Modifier le véhicule de courtoisie' : '🚗 Prêter un véhicule de courtoisie'}
                 </div>
+                ${(config.stripePaymentsWorkerUrl && ev.paymentStatus !== 'confirme') ? `
+                <div class="comment-btn empreinte-btn" data-id="${ev.id}" data-nom="${encodeURIComponent(ev.raw || '')}">
+                  🔒 ${ev.paymentStatus === 'en_attente' ? "Relancer l'empreinte bancaire" : 'Demander une empreinte bancaire'}
+                </div>` : ''}
               </div>
             </div>
             <div class="card-actions">
@@ -1907,6 +1975,9 @@ function renderList(){
   });
   document.querySelectorAll('.courtesy-edit-btn').forEach(el => {
     el.onclick = () => openCourtesyModal(el.dataset.id, decodeURIComponent(el.dataset.current));
+  });
+  document.querySelectorAll('.empreinte-btn').forEach(el => {
+    el.onclick = () => openEmpreinteModal(el.dataset.id, decodeURIComponent(el.dataset.nom));
   });
 }
 
