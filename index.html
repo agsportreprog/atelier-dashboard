@@ -2,201 +2,2120 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Assistant AG Sport Reprog</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Atelier — Planning du jour</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ff6a2b">
 <style>
   :root{
     --bg: #14161a;
     --panel: #1d2027;
     --panel-2: #262a33;
+    --line: #33384433;
     --line-solid: #383d47;
     --accent: #ff6a2b;
+    --accent-dim: #ff6a2b22;
+    --done: #3ecf8e;
+    --done-dim: #3ecf8e22;
+    --cours: #4a9eff;
+    --cours-dim: #4a9eff22;
+    --courtesy: #a78bfa;
+    --courtesy-dim: #a78bfa22;
     --text: #f2f0ea;
     --text-dim: #9aa0ab;
-    box-sizing: border-box;
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    --mono: 'SF Mono', 'Consolas', monospace;
   }
-  *{box-sizing:border-box;}
-  html, body{height:100%; margin:0;}
-  body{
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system, 'Segoe UI', Roboto, sans-serif;
-    display:flex; flex-direction:column; height:100%;
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0; padding:0; height:100%; background:var(--bg); color:var(--text);
+    font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; overflow-x:hidden;}
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;
+    padding:18px 28px; border-bottom:1px solid var(--line-solid);
+    background: linear-gradient(180deg, #191c22, #14161a);
   }
-  .widget-header{
-    padding:14px 16px; border-bottom:1px solid var(--line-solid);
-    display:flex; align-items:center; gap:10px; flex-shrink:0;
+  .brand{display:flex; align-items:center; gap:14px;}
+  .brand .dot{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 14px var(--accent);}
+  .brand h1{font-size:15px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; margin:0; color:var(--text-dim);}
+  .brand .date{font-size:20px; font-weight:700; margin-top:2px; text-transform:capitalize;}
+  .status{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:12px; color:var(--text-dim);}
+  .status .led{width:8px; height:8px; border-radius:50%; background:#555;}
+  .suite-tabs{display:flex; gap:4px; background:var(--panel-2); padding:4px; border-radius:10px; border:1px solid var(--line-solid);}
+  .tab-link{
+    padding:8px 14px; border-radius:7px; font-size:12px; font-weight:600; text-decoration:none;
+    color:var(--text-dim); white-space:nowrap;
   }
-  .widget-header .dot{width:8px; height:8px; border-radius:50%; background:var(--accent);}
-  .widget-header h1{font-size:14px; margin:0; font-weight:700;}
-  .widget-header .sub{font-size:11px; color:var(--text-dim); margin-top:1px;}
-  .chat-messages{
-    flex:1; overflow-y:auto; padding:14px 12px; display:flex; flex-direction:column; gap:10px;
+  .tab-link.active{background:var(--accent); color:#1a0d05;}
+  .tab-link:not(.active):hover{color:var(--text);}
+  .status .led.live{background:var(--done); box-shadow:0 0 8px var(--done);}
+  .status .led.lost{background:#ff5555; box-shadow:0 0 8px #ff5555; display:inline-block; margin-right:8px;}
+  .reconnect-btn{
+    display:flex; align-items:center; background:#ff555522; border:1px solid #ff5555;
+    color:#ff9c9c; padding:8px 14px; border-radius:8px; font-size:12px; font-weight:700;
+    cursor:pointer; font-family:inherit; animation: pulse-glow 1.6s ease-in-out infinite;
   }
-  .chat-bubble{padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.45; max-width:88%;}
-  .chat-bubble.user{background:var(--accent); color:#1a0d05; align-self:flex-end;}
-  .chat-bubble.assistant{background:var(--panel-2); color:var(--text); align-self:flex-start;}
-  .chat-bubble.tool-info{background:transparent; border:1px dashed var(--line-solid); color:var(--text-dim); font-size:12px; align-self:center; font-style:italic; max-width:95%;}
-  .chat-input-row{display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line-solid); flex-shrink:0;}
-  .chat-input-row input{flex:1; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid); background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;}
-  .chat-input-row input:focus{outline:1px solid var(--accent);}
-  .chat-input-row button{padding:11px 16px; border-radius:9px; border:none; background:var(--accent); color:#1a0d05; font-weight:700; cursor:pointer; font-size:14px;}
-  .chat-input-row button:disabled{opacity:0.5; cursor:default;}
-  .checkout-prompt{background:var(--panel-2); border:1px solid var(--accent); border-radius:10px; padding:14px;}
-  .checkout-prompt .policy{font-size:12.5px; color:var(--text-dim); margin-bottom:10px; line-height:1.4;}
-  .checkout-prompt button{
-    width:100%; padding:12px; border-radius:9px; border:none; background:var(--accent);
-    color:#1a0d05; font-weight:700; cursor:pointer; font-size:14px;
+  @keyframes pulse-glow{
+    0%, 100%{ box-shadow:0 0 0 0 #ff555555; }
+    50%{ box-shadow:0 0 0 6px #ff555500; }
   }
+  .status button{
+    background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text);
+    padding:8px 14px; border-radius:8px; font-size:12px; cursor:pointer; font-family:inherit;
+  }
+  .status button:active{transform:scale(.96);}
+
+  .counts{display:flex; gap:10px; padding:16px 28px 0;}
+  .pill{
+    font-family:var(--mono); font-size:12px; padding:6px 12px; border-radius:20px;
+    border:1px solid var(--line-solid); color:var(--text-dim);
+  }
+  .pill b{color:var(--text); font-size:14px;}
+
+  .list{padding:16px 28px 40px; display:flex; flex-direction:column; gap:10px;}
+
+  .day-header{
+    display:flex; align-items:baseline; gap:10px; margin:22px 0 4px; padding-bottom:8px;
+    border-bottom:1px solid var(--line-solid);
+  }
+  .day-header:first-child{margin-top:0;}
+  .day-header .label{font-size:16px; font-weight:700; text-transform:capitalize;}
+  .day-header .today-tag{
+    font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.05em;
+    background:var(--accent); color:#1a0d05; padding:3px 8px; border-radius:6px; text-transform:uppercase;
+  }
+  .day-header .count{font-size:12px; color:var(--text-dim); margin-left:auto; font-family:var(--mono);}
+
+  .multiday-tag{
+    display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text-dim);
+    padding:2px 7px; border-radius:6px; margin-top:2px;
+  }
+
+  .card{
+    display:flex; flex-direction:column;
+    background:var(--panel); border:1px solid var(--line-solid); border-radius:14px;
+    overflow:hidden; transition: opacity .25s, transform .15s;
+  }
+  .card.done{opacity:.7;}
+  .card.paused{opacity:.78;}
+  .card.paused .time{background:#ffc94622;}
+  .card.inprogress .time{background:var(--cours-dim);}
+  .card.has-courtesy{border-left:3px solid var(--courtesy);}
+  .courtesy-badge{
+    display:inline-block; background:var(--courtesy-dim); color:var(--courtesy);
+    padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700; margin-top:4px;
+  }
+  .modal .field select{
+    width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
+  }
+  .card-top{display:flex; align-items:stretch;}
+  .card-actions{display:flex; border-top:1px solid var(--line-solid);}
+  .action-btn{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:12px 6px; background:var(--panel-2); border:none; border-right:1px solid var(--line-solid);
+    color:#c2c8d2; font-family:inherit; font-size:12px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.03em; cursor:pointer;
+  }
+  .action-btn:last-child{border-right:none;}
+  .action-btn svg{width:16px; height:16px; opacity:.75;}
+  .action-btn.cours-btn.on{background:#4a9eff3d; color:#7ec2ff;}
+  .action-btn.cours-btn.on svg{opacity:1;}
+  .action-btn.pause-btn.on{background:#ffc9463d; color:#ffd873;}
+  .action-btn.pause-btn.on svg{opacity:1;}
+  .action-btn.done-btn.on{background:#3ecf8e3d; color:#6fe0ac;}
+  .action-btn.done-btn.on svg{opacity:1;}
+  .card .time{
+    width:118px; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:var(--panel-2); font-family:var(--mono); font-weight:700; font-size:14px; border-right:1px solid var(--line-solid);
+    text-align:center; line-height:1.5;
+  }
+  .card .time .arrow{display:block; font-size:10px; color:var(--text-dim); font-weight:400; margin:2px 0;}
+  .card .time span{font-size:10px; font-weight:400; color:var(--text-dim); margin-top:2px;}
+  .card .body{flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:4px; min-width:0;}
+  .card .model{font-size:17px; font-weight:700;}
+  .card .presta{font-size:13px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.04em;}
+  .card .phone{font-size:13px; color:var(--text-dim); font-family:var(--mono);}
+  .card .raw{font-size:13px; color:var(--text-dim);}
+  .comment-text{
+    font-size:13px; color:var(--text-dim); font-style:italic; margin-top:2px;
+    padding:6px 10px; background:var(--panel-2); border-radius:8px; border-left:2px solid var(--accent);
+  }
+  .comment-btn{
+    font-size:12px; color:var(--accent); margin-top:4px; cursor:pointer; width:fit-content;
+  }
+  .tool-tag{
+    display:inline-block; background:var(--panel-2); border:1px solid var(--line-solid);
+    padding:1px 7px; border-radius:5px; font-size:10px; margin-left:6px; color:var(--text-dim);
+    text-transform:none; letter-spacing:0; font-weight:600;
+  }
+  .attachments-list{display:flex; flex-direction:column; gap:3px; margin-top:6px;}
+  .attachment-link{
+    font-size:12px; color:var(--cours); cursor:pointer; width:fit-content;
+  }
+  .attachment-link:hover{text-decoration:underline;}
+
+  .modal-overlay{
+    position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center;
+    z-index:100; padding:20px;
+  }
+  .modal{
+    background:var(--panel); border:1px solid var(--line-solid); border-radius:16px;
+    padding:24px; width:100%; max-width:440px;
+  }
+  .modal h3{margin:0 0 14px; font-size:16px;}
+  .modal textarea{
+    width:100%; min-height:110px; padding:12px 14px; padding-right:52px; border-radius:10px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px; resize:vertical;
+  }
+  .textarea-wrap{position:relative;}
+  .voice-btn{
+    position:absolute; bottom:10px; right:10px; width:36px; height:36px; border-radius:50%;
+    border:1px solid var(--line-solid); background:var(--panel); color:var(--text-dim);
+    font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition: all .15s;
+  }
+  .voice-btn.listening{
+    background:#ff5555; border-color:#ff5555; color:white;
+    animation: pulse-glow 1.2s ease-in-out infinite;
+  }
+  .modal .modal-actions{display:flex; gap:10px; margin-top:16px;}
+  .modal .modal-actions button{
+    flex:1; padding:12px; border-radius:10px; border:none; font-weight:700; font-size:14px; cursor:pointer;
+  }
+  .modal .btn-save{background:var(--accent); color:#1a0d05;}
+  .modal .btn-cancel{background:var(--panel-2); color:var(--text); border:1px solid var(--line-solid) !important;}
+  .modal .field{margin-bottom:14px;}
+  .modal .field label{display:block; font-size:11px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em;}
+  .modal .field.required label::after{content:' *'; color:var(--accent);}
+  .modal .field input{
+    width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
+  }
+  .perf-summary{font-size:12px; color:var(--text-dim); margin-top:6px; font-family:var(--mono);}
+  .mini-cal{background:var(--panel-2); border:1px solid var(--line-solid); border-radius:10px; padding:12px; margin-top:4px; max-width:480px;}
+  .mc-loading{display:block; text-transform:none; letter-spacing:0; font-size:12px; color:var(--text-dim); font-weight:400; margin-bottom:10px;}
+  .mc-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .mc-title{font-size:13px; font-weight:700; text-transform:capitalize; color:var(--text);}
+  .mc-nav{background:var(--panel); border:1px solid var(--line-solid); color:var(--text); width:26px; height:26px; border-radius:6px; cursor:pointer; font-size:14px; line-height:1;}
+  .mc-nav:disabled{opacity:.3; cursor:default;}
+  .mc-weekdays{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:10px; color:var(--text-dim); margin-bottom:5px; font-weight:600;}
+  .mc-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px;}
+  .mc-cell{
+    position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+    border-radius:6px; font-size:12px; cursor:pointer; background:var(--panel); color:var(--text);
+  }
+  .mc-day{display:flex; flex-direction:column; align-items:center; line-height:1.05;}
+  .mc-day small{font-size:7px; text-transform:uppercase; color:var(--text-dim); font-weight:600; margin-top:1px;}
+  .mc-cell.mc-selected .mc-day small{color:#1a0d05aa;}
+  .mc-cell.mc-empty{visibility:hidden; cursor:default;}
+  .mc-cell.mc-busy{background:var(--accent-dim); color:var(--accent); font-weight:600;}
+  .mc-cell.mc-selected{background:var(--accent); color:#1a0d05; font-weight:700;}
+  .mc-count{
+    position:absolute; bottom:1px; right:1px; font-size:8px; background:var(--accent); color:#1a0d05;
+    border-radius:50%; width:13px; height:13px; display:flex; align-items:center; justify-content:center; font-weight:700;
+  }
+  .mc-cell.mc-selected .mc-count{background:#1a0d05; color:var(--accent);}
+  .modal-newevent{max-width:none; width:98vw; max-height:96vh; overflow-y:auto;}
+  .modal-newevent .newevent-left{flex:0 0 360px;}
+  .modal-newevent .newevent-right{flex:1 1 600px;}
+  .month-summary{
+    display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;
+  }
+  .month-summary .pill{font-family:var(--mono); font-size:12px; padding:6px 12px; border-radius:20px; border:1px solid var(--line-solid); color:var(--text-dim);}
+  .month-summary .pill b{color:var(--text); font-size:14px;}
+  .newevent-columns{display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start;}
+  .newevent-left{flex:1 1 340px; min-width:280px;}
+  .newevent-right{flex:1 1 340px; min-width:280px; border-left:1px solid var(--line-solid); padding-left:28px;}
+  @media (max-width: 720px){
+    .newevent-right{border-left:none; padding-left:0; border-top:1px solid var(--line-solid); padding-top:20px; margin-top:8px;}
+  }
+  .day-agenda-title{font-size:13px; font-weight:700; margin-bottom:12px; text-transform:capitalize; color:var(--text);}
+  #dayAgendaPanel .search-result{margin-bottom:8px; padding:12px 14px;}
+  #dayAgendaPanel .search-result.multiday{padding:7px 12px; opacity:.75;}
+  #dayAgendaPanel .search-result.multiday .sr-title{
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; font-size:12px; font-weight:600;
+  }
+  #dayAgendaPanel .search-result.multiday .sr-date{font-size:10px; width:auto;}
+  .sr-courtesy{
+    display:block; font-size:11px; color:var(--courtesy); margin-top:3px; font-weight:600;
+  }
+  .perf-actions{display:flex; gap:14px; margin-top:4px; flex-wrap:wrap;}
+
+  .modal-search{max-width:560px;}
+  .modal-search #searchInput{
+    width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line-solid);
+    background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px; margin-bottom:14px;
+  }
+  .search-results{max-height:50vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px;}
+  .search-hint{color:var(--text-dim); font-size:13px; padding:10px 2px;}
+  .search-result{
+    display:flex; gap:12px; align-items:flex-start; background:var(--panel-2);
+    border:1px solid var(--line-solid); border-radius:10px; padding:10px 12px;
+  }
+  .sr-date{font-family:var(--mono); font-size:11px; color:var(--text-dim); width:72px; flex-shrink:0; padding-top:2px;}
+  .sr-body{flex:1; min-width:0;}
+  .sr-title{font-size:14px; font-weight:700;}
+  .sr-phone{font-size:12px; color:var(--text-dim); font-family:var(--mono);}
+  .sr-status{font-size:11px; color:var(--text-dim); flex-shrink:0; text-transform:uppercase; padding-top:2px;}
+  .card.done .time{background:var(--done-dim);}
+
+  .empty{padding:60px 20px; text-align:center; color:var(--text-dim);}
+  .empty .big{font-size:15px; margin-bottom:6px; color:var(--text);}
+
+  .setup{max-width:480px; margin:60px auto; padding:0 20px;}
+  .setup h2{font-size:18px; margin-bottom:4px;}
+  .setup p{color:var(--text-dim); font-size:13px; line-height:1.5;}
+  .setup label{display:block; font-size:12px; color:var(--text-dim); margin:16px 0 6px;}
+  .setup input{
+    width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--line-solid);
+    background:var(--panel); color:var(--text); font-family:var(--mono); font-size:13px;
+  }
+  .setup .checkbox-row{
+    display:flex; align-items:center; gap:8px; margin-top:18px; font-size:13px; color:var(--text-dim);
+    cursor:pointer;
+  }
+  .setup .checkbox-row input{width:auto; padding:0;}
+  .status .checkbox-row{
+    display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-dim);
+    cursor:pointer; white-space:nowrap;
+  }
+  .status .checkbox-row input{width:auto;}
+  .setup .primary{
+    margin-top:22px; width:100%; padding:14px; border-radius:10px; border:none;
+    background:var(--accent); color:#1a0d05; font-weight:700; font-size:14px; cursor:pointer;
+  }
+  .setup .origin{
+    margin-top:18px; padding:12px 14px; background:var(--panel-2); border-radius:10px;
+    font-family:var(--mono); font-size:12px; color:var(--text-dim); word-break:break-all;
+  }
+  .center-login{display:flex; flex-direction:column; align-items:center; justify-content:center; padding:80px 20px; gap:16px;}
+  .center-login button{
+    background:var(--accent); color:#1a0d05; border:none; padding:16px 28px; border-radius:12px;
+    font-weight:700; font-size:15px; cursor:pointer;
+  }
+  /* Paiement / empreinte bancaire / non-présentation */
+  .payment-pending-badge{
+    display:inline-block; margin:6px 0; padding:3px 8px; border-radius:6px;
+    background:#4a3a1a; color:#e0b356; font-size:12px; font-weight:600;
+  }
+  .payment-confirmed-badge{
+    display:inline-block; margin:6px 0; padding:3px 8px; border-radius:6px;
+    background:#1a3a26; color:#3ecf8e; font-size:12px; font-weight:600;
+  }
+  .noshow-row{ margin-top:10px; padding-top:8px; border-top:1px dashed var(--border, #333); display:flex; justify-content:flex-end; }
+  .noshow-btn{
+    font-size:11px; padding:4px 9px; border-radius:6px; border:1px solid #8a2020;
+    background:transparent; color:#e05a5a; cursor:pointer; opacity:0.75;
+  }
+  .noshow-btn:hover{ opacity:1; background:#8a202022; }
+  .noshow-btn.charged{ border-color:#5a5a5a; color:#8a8a8a; opacity:0.6; cursor:default; }
 </style>
 </head>
 <body>
-  <div class="widget-header">
-    <div class="dot"></div>
-    <div>
-      <h1>AG Sport Reprog</h1>
-      <div class="sub">Conseil &amp; prise de rendez-vous</div>
-    </div>
-  </div>
-  <div id="chatMessages" class="chat-messages"></div>
-  <div class="chat-input-row">
-    <input id="chatInput" placeholder="Écrivez votre message...">
-    <button id="chatSendBtn">Envoyer</button>
-  </div>
+
+<div id="app"></div>
 
 <script>
-  // ---------------------------------------------------------------------
-  // Configuration — à compléter une fois le Worker public-booking-api déployé
-  // ---------------------------------------------------------------------
-  const PUBLIC_BOOKING_WORKER_URL = 'https://public-booking-api.VOTRE-SOUS-DOMAINE.workers.dev';
-  const PUBLIC_BOOKING_ACCESS_KEY = 'VOTRE_CLE_ACCES';
-  // ---------------------------------------------------------------------
+// Le statut et le commentaire sont stockés en propriété privée invisible de l'événement
+// (n'affecte jamais la couleur ni l'apparence de l'événement dans Google Agenda)
+const STATUS_KEY = 'atelier_status';   // 'cours' | 'paused' | 'done' | absent
+const COMMENT_KEY = 'atelier_comment';
+const PERF_BEFORE_KEY = 'atelier_perf_before';
+const PERF_AFTER_KEY = 'atelier_perf_after';
+const PERF060_BEFORE_KEY = 'atelier_perf060_before';
+const PERF060_AFTER_KEY = 'atelier_perf060_after';
+const PERF_HP_BEFORE_KEY = 'atelier_perf_hp_before';
+const PERF_HP_AFTER_KEY = 'atelier_perf_hp_after';
+const PERF_TORQUE_BEFORE_KEY = 'atelier_perf_torque_before';
+const PERF_TORQUE_AFTER_KEY = 'atelier_perf_torque_after';
+const COURTESY_CAR_KEY = 'atelier_courtesy_car';
+const PAYMENT_STATUS_KEY = 'atelier_payment_status';       // 'en_attente' | 'confirme' | absent (RDV créé hors assistant IA)
+const PAYMENT_CREATED_AT_KEY = 'atelier_payment_created_at'; // ISO, pour le nettoyage automatique des RDV jamais confirmés
+const STRIPE_CUSTOMER_KEY = 'atelier_stripe_customer';
+const STRIPE_PM_KEY = 'atelier_stripe_pm';
+const NOSHOW_CHARGED_KEY = 'atelier_noshow_charged';        // 'true' | absent
+const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c3: 'C3 (diesel)' };
 
-  let conversationMessages = [];
+// Renvoie l'ensemble des véhicules de courtoisie déjà prêtés sur au moins un jour de la plage
+// [dateFrom, dateTo] (AAAA-MM-JJ) — sert à ne pas proposer une voiture déjà partie ce jour-là.
+// excludeId permet d'ignorer le rendez-vous en cours d'édition (pour ne pas se bloquer soi-même).
+function getBusyCourtesyKeys(dateFrom, dateTo, excludeId){
+  const from = new Date(dateFrom + 'T00:00:00');
+  const to = new Date((dateTo || dateFrom) + 'T23:59:59');
+  const busy = new Set();
+  events.forEach(ev => {
+    if(!ev.courtesyCar || ev.id === excludeId) return;
+    if(ev.startD <= to && ev.endD >= from) busy.add(ev.courtesyCar);
+  });
+  return busy;
+}
 
-  function addChatBubble(role, text){
-    const el = document.getElementById('chatMessages');
-    const bubble = document.createElement('div');
-    bubble.className = `chat-bubble ${role}`;
-    bubble.textContent = text;
-    el.appendChild(bubble);
-    el.scrollTop = el.scrollHeight;
-    return bubble;
+function buildCourtesyOptionsHtml(busyKeys, current){
+  const noneOpt = `<option value="" ${!current ? 'selected' : ''}>Aucun</option>`;
+  const carOpts = Object.entries(COURTESY_CARS).map(([key, label]) => {
+    const busy = busyKeys.has(key) && key !== current; // si c'est la voiture déjà assignée à CE rdv, elle reste choisissable
+    const text = busy ? `🚫 ${label} — déjà prêtée ce jour` : label;
+    return `<option value="${key}" ${current === key ? 'selected' : ''} ${busy ? 'disabled' : ''}>${text}</option>`;
+  }).join('');
+  return noneOpt + carOpts;
+}
+
+let config = null;       // { workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, soundEnabled }
+let accessToken = null;
+let events = [];
+let remoteTasks = [];
+let pollTimer = null;
+let remoteTasksTimer = null;
+let gmailScanTimer = null;
+let remoteReminderTimer = null;
+let tokenTimer = null;
+let retryTimer = null;
+let connectionLost = false;
+let previousSnapshot = null; // pour détecter les changements entre deux actualisations
+let audioCtx = null;
+
+// Les 5 correspondants habituels pour les dossiers à distance (mails avec fichier à traiter)
+const REMOTE_SENDERS = [
+  'lmhb.auto@gmail.com',
+  'courlay683@gmail.com',
+  'tar.garage63@gmail.com',
+  'latelier-auto@etik.com',
+  'diagautobleslois@gmail.com'
+];
+
+// Détecte l'outil à partir du nom du fichier joint : "slave" dans le nom -> Autotuner, sinon MMS par défaut
+function detectTool(filename){
+  return /slave/i.test(filename || '') ? 'Autotuner' : 'MMS';
+}
+
+// Extrait une plaque d'immatriculation (format SIV : AA-123-AA, avec ou sans tirets/espaces) depuis
+// l'objet du mail reçu — renvoie null si aucune plaque reconnaissable n'est trouvée.
+function extractPlaque(subject){
+  const m = (subject || '').match(/\b([A-Za-z]{2})[\s-]?(\d{3})[\s-]?([A-Za-z]{2})\b/);
+  if(!m) return null;
+  return `${m[1].toUpperCase()}-${m[2]}-${m[3].toUpperCase()}`;
+}
+
+const app = document.getElementById('app');
+
+// Débloque l'audio dès la première interaction (obligatoire sur mobile/tablette avant de pouvoir jouer un son)
+document.addEventListener('click', () => {
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){}
   }
+}, { once: false });
 
-  function addChatInfo(text){
-    const el = document.getElementById('chatMessages');
-    const bubble = document.createElement('div');
-    bubble.className = 'chat-bubble tool-info';
-    bubble.textContent = text;
-    el.appendChild(bubble);
-    el.scrollTop = el.scrollHeight;
-    return bubble;
+function playChime(){
+  if(config?.soundEnabled === false) return;
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    const startAt = ctx.currentTime;
+
+    // Alarme en rafale : 3 bips stridents montants-descendants, volume élevé
+    for(let i = 0; i < 3; i++){
+      const t0 = startAt + i * 0.26;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1100, t0);
+      osc.frequency.exponentialRampToValueAtTime(1900, t0 + 0.09);
+      osc.frequency.exponentialRampToValueAtTime(1100, t0 + 0.2);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.55, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.24);
+    }
+  }catch(e){}
+}
+
+function computeSnapshot(evts){
+  return evts
+    .map(e => `${e.id}:${e.start}:${e.end}:${e.done}:${e.paused}:${e.inProgress}:${e.comment}`)
+    .sort()
+    .join('|');
+}
+
+async function loadConfig(){
+  try{
+    const raw = localStorage.getItem('atelier_config');
+    config = raw ? JSON.parse(raw) : null;
+  }catch(e){ config = null; }
+}
+
+async function saveConfig(c){
+  localStorage.setItem('atelier_config', JSON.stringify(c));
+  config = c;
+}
+
+function stopApp(){
+  if(pollTimer) clearInterval(pollTimer);
+  if(tokenTimer) clearTimeout(tokenTimer);
+  if(retryTimer) clearTimeout(retryTimer);
+  if(remoteTasksTimer) clearInterval(remoteTasksTimer);
+  if(gmailScanTimer) clearInterval(gmailScanTimer);
+  if(remoteReminderTimer) clearInterval(remoteReminderTimer);
+}
+
+function renderSetup(){
+  stopApp();
+  app.innerHTML = `
+    <div class="setup">
+      <h2>Configuration</h2>
+      <p>À faire une fois sur cet appareil. Refais cette étape sur l'autre écran (PC ou tablette) avec les mêmes infos.</p>
+      <label>URL du relais (Cloudflare Worker)</label>
+      <input id="workerUrl" placeholder="https://xxxx.workers.dev" value="${config?.workerUrl || ''}">
+      <label>ID de l'agenda Google</label>
+      <input id="calendarId" placeholder="toncompte@gmail.com" value="${config?.calendarId || ''}">
+      <label>URL du relais dossiers à distance (optionnel)</label>
+      <input id="remoteWorkerUrl" placeholder="https://remote-tasks-api.xxxx.workers.dev" value="${config?.remoteWorkerUrl || ''}">
+      <label>Clé d'accès dossiers à distance (optionnel)</label>
+      <input id="remoteAccessKey" placeholder="la clé définie dans le Worker" value="${config?.remoteAccessKey || ''}">
+      <label>URL du relais paiements Stripe (optionnel — prélèvement en cas d'absence)</label>
+      <input id="stripePaymentsWorkerUrl" placeholder="https://stripe-payments-api.xxxx.workers.dev" value="${config?.stripePaymentsWorkerUrl || ''}">
+      <label>Clé d'accès paiements Stripe (optionnel)</label>
+      <input id="stripePaymentsAccessKey" placeholder="la clé définie dans le Worker" value="${config?.stripePaymentsAccessKey || ''}">
+      <label class="checkbox-row"><input type="checkbox" id="soundEnabled" ${config?.soundEnabled === false ? '' : 'checked'}> 🔊 Jouer un son à chaque changement (nouveau véhicule, statut modifié...)</label>
+      <button class="primary" id="saveBtn">Enregistrer et continuer</button>
+    </div>
+  `;
+  document.getElementById('saveBtn').onclick = async () => {
+    const workerUrl = document.getElementById('workerUrl').value.trim();
+    const calendarId = document.getElementById('calendarId').value.trim();
+    const remoteWorkerUrl = document.getElementById('remoteWorkerUrl').value.trim();
+    const remoteAccessKey = document.getElementById('remoteAccessKey').value.trim();
+    const stripePaymentsWorkerUrl = document.getElementById('stripePaymentsWorkerUrl').value.trim();
+    const stripePaymentsAccessKey = document.getElementById('stripePaymentsAccessKey').value.trim();
+    const soundEnabled = document.getElementById('soundEnabled').checked;
+    if(!workerUrl || !calendarId) return;
+    await saveConfig({workerUrl, calendarId, remoteWorkerUrl, remoteAccessKey, stripePaymentsWorkerUrl, stripePaymentsAccessKey, soundEnabled});
+    init();
+  };
+}
+
+function renderLoading(){
+  app.innerHTML = `<div class="center-login"><div style="color:var(--text-dim); font-size:14px;">Connexion au relais...</div></div>`;
+}
+
+// Récupère un jeton d'accès frais auprès du relais Cloudflare (aucune interaction utilisateur,
+// aucune dépendance aux cookies du navigateur : fonctionne indéfiniment sans surveillance)
+// fetch avec délai maximum, et une retentative silencieuse avant d'abandonner pour de bon
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20000, retriesLeft = 1){
+  try{
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+    return res;
+  }catch(e){
+    if(retriesLeft > 0){
+      await new Promise(r => setTimeout(r, 1000)); // petite pause avant de retenter
+      return fetchWithTimeout(url, options, timeoutMs, retriesLeft - 1);
+    }
+    throw e;
   }
+}
 
-  function showCheckoutButton(url){
-    const el = document.getElementById('chatMessages');
-    const wrap = document.createElement('div');
-    wrap.className = 'chat-bubble assistant';
-    wrap.innerHTML = `
-      <div class="checkout-prompt">
-        <div class="policy">🔒 Pour finaliser le rendez-vous, enregistrez votre carte bancaire sur la page sécurisée Stripe. Aucun débit n'est effectué maintenant.</div>
-        <button id="goToStripeBtn">Enregistrer ma carte →</button>
+async function getAccessToken(){
+  try{
+    const res = await fetchWithTimeout(config.workerUrl);
+    if(!res.ok) throw new Error('relais indisponible');
+    const data = await res.json();
+    if(!data.access_token) throw new Error('réponse invalide');
+    accessToken = data.access_token;
+    connectionLost = false;
+    if(tokenTimer) clearTimeout(tokenTimer);
+    const delayMs = Math.max((data.expires_in - 300) * 1000, 30000);
+    tokenTimer = setTimeout(getAccessToken, delayMs);
+    return true;
+  }catch(e){
+    markConnectionLost();
+    return false;
+  }
+}
+
+// Requête authentifiée avec retentative automatique et unique si le jeton a expiré entre-temps
+async function authFetch(url, options = {}, allowRetry = true){
+  const opts = { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${accessToken}` } };
+  const res = await fetchWithTimeout(url, opts);
+  if(res.status === 401 && allowRetry){
+    const ok = await getAccessToken();
+    if(ok) return authFetch(url, options, false);
+  }
+  return res;
+}
+
+function markConnectionLost(){
+  connectionLost = true;
+  renderList();
+  if(retryTimer) clearTimeout(retryTimer);
+  // nouvelle tentative automatique, sans aucune action requise
+  retryTimer = setTimeout(async () => {
+    const ok = await getAccessToken();
+    if(ok) fetchEvents();
+  }, 15000);
+}
+
+let vueMois = false; // false = 3 jours (par défaut), true = jusqu'à 31 jours à partir d'aujourd'hui
+function joursAffiches(){ return vueMois ? 31 : 3; }
+
+function windowRange(){
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + joursAffiches() - 1, 23,59,59);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString(), start, end };
+}
+
+function dayKey(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function mapEvent(ev){
+  const startRaw = ev.start?.dateTime || ev.start?.date;
+  const endRaw = ev.end?.dateTime || ev.end?.date;
+  const allDay = !ev.start?.dateTime;
+  const startD = new Date(startRaw);
+  // pour un événement "jour entier", la date de fin Google est exclusive : on retire 1 jour
+  let endD = new Date(endRaw);
+  if(allDay) endD = new Date(endD.getTime() - 24*3600*1000);
+  const priv = ev.extendedProperties?.private || {};
+  return {
+    id: ev.id,
+    start: startRaw,
+    end: endRaw,
+    startD, endD, allDay,
+    raw: ev.summary || '',
+    done: priv[STATUS_KEY] === 'done',
+    paused: priv[STATUS_KEY] === 'paused',
+    inProgress: priv[STATUS_KEY] === 'cours',
+    comment: priv[COMMENT_KEY] || '',
+    perfBefore: priv[PERF_BEFORE_KEY] || '',
+    perfAfter: priv[PERF_AFTER_KEY] || '',
+    perf060Before: priv[PERF060_BEFORE_KEY] || '',
+    perf060After: priv[PERF060_AFTER_KEY] || '',
+    hpBefore: priv[PERF_HP_BEFORE_KEY] || '',
+    hpAfter: priv[PERF_HP_AFTER_KEY] || '',
+    torqueBefore: priv[PERF_TORQUE_BEFORE_KEY] || '',
+    torqueAfter: priv[PERF_TORQUE_AFTER_KEY] || '',
+    courtesyCar: priv[COURTESY_CAR_KEY] || '',
+    paymentStatus: priv[PAYMENT_STATUS_KEY] || '',
+    stripeCustomerId: priv[STRIPE_CUSTOMER_KEY] || '',
+    stripePaymentMethodId: priv[STRIPE_PM_KEY] || '',
+    noShowCharged: priv[NOSHOW_CHARGED_KEY] === 'true'
+  };
+}
+
+// ---------- Dossiers à distance (mails avec fichier à traiter) ----------
+
+let scanningGmail = false; // empêche deux scans Gmail de tourner en même temps (cause des doublons)
+
+// Fusionne les dossiers en double (même id = même mail) qui ont pu être créés par un scan lancé
+// deux fois en parallèle ou par deux appareils (PC/tablette) — garde le statut le plus avancé et
+// le commentaire non vide s'il y en a un.
+function dedupeRemoteTasks(tasks){
+  const priorite = { done: 3, cours: 2, paused: 1, '': 0 };
+  const parId = new Map();
+  for(const t of tasks){
+    const existant = parId.get(t.id);
+    if(!existant){ parId.set(t.id, t); continue; }
+    const fusion = { ...existant };
+    if((priorite[t.status] || 0) > (priorite[existant.status] || 0)) fusion.status = t.status;
+    if(!fusion.comment && t.comment) fusion.comment = t.comment;
+    parId.set(t.id, fusion);
+  }
+  return [...parId.values()];
+}
+
+async function fetchRemoteTasks(){
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey){
+    console.warn('[dossiers à distance] non configuré (URL ou clé manquante)');
+    return;
+  }
+  try{
+    const res = await fetch(config.remoteWorkerUrl, { headers: { 'X-Auth-Key': config.remoteAccessKey } });
+    if(!res.ok){
+      console.error('[dossiers à distance] fetchRemoteTasks: réponse HTTP', res.status, await res.text().catch(()=>''));
+      return;
+    }
+    remoteTasks = dedupeRemoteTasks(await res.json());
+    console.log('[dossiers à distance] tâches chargées :', remoteTasks.length);
+    renderList();
+  }catch(e){
+    console.error('[dossiers à distance] fetchRemoteTasks a échoué :', e);
+  }
+}
+
+async function saveRemoteTasksToServer(){
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey) return;
+  try{
+    await fetch(config.remoteWorkerUrl, {
+      method: 'PUT',
+      headers: { 'X-Auth-Key': config.remoteAccessKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(remoteTasks)
+    });
+  }catch(e){}
+}
+
+function decodeBase64Url(data){
+  try{
+    const base64 = (data || '').replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder('utf-8').decode(bytes);
+  }catch(e){ return ''; }
+}
+
+function parseGmailMessage(msg){
+  const headers = msg.payload?.headers || [];
+  const getHeader = (name) => (headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '');
+  const subject = getHeader('Subject');
+  const from = getHeader('From');
+  const fromEmail = ((from.match(/<(.+?)>/) || [null, from])[1] || '').trim().toLowerCase();
+
+  let bodyText = '';
+  const attachments = [];
+  (function walk(part){
+    if(!part) return;
+    if(part.filename && part.body?.attachmentId){
+      attachments.push({ attachmentId: part.body.attachmentId, filename: part.filename });
+    } else if(part.mimeType === 'text/plain' && part.body?.data){
+      bodyText += decodeBase64Url(part.body.data);
+    }
+    (part.parts || []).forEach(walk);
+  })(msg.payload);
+
+  return {
+    subject,
+    fromEmail,
+    bodyText: bodyText.trim(),
+    attachments,
+    receivedAt: new Date(parseInt(msg.internalDate, 10) || Date.now()).toISOString()
+  };
+}
+
+async function scanGmailForNewTasks(){
+  if(!config.remoteWorkerUrl || !config.remoteAccessKey){
+    console.warn('[dossiers à distance] scan Gmail ignoré : non configuré');
+    return;
+  }
+  if(scanningGmail){
+    console.log('[dossiers à distance] scan déjà en cours, on ignore ce déclenchement');
+    return;
+  }
+  scanningGmail = true;
+  console.log('[dossiers à distance] scan Gmail en cours...');
+  try{
+    const fromQuery = REMOTE_SENDERS.map(e => `from:${e}`).join(' OR ');
+    const q = encodeURIComponent(`(${fromQuery}) has:attachment newer_than:30d in:inbox`);
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=30`;
+    const res = await authFetch(url);
+    if(!res.ok){
+      console.error('[dossiers à distance] recherche Gmail : réponse HTTP', res.status, await res.text().catch(()=>''));
+      return;
+    }
+    const data = await res.json();
+    const messages = data.messages || [];
+    console.log('[dossiers à distance] mails trouvés correspondant aux critères :', messages.length);
+    const existingIds = new Set(remoteTasks.map(t => t.id));
+    const newOnes = messages.filter(m => !existingIds.has(m.id));
+    console.log('[dossiers à distance] dont nouveaux (pas encore importés) :', newOnes.length);
+    if(newOnes.length === 0) return;
+
+    let addedAny = false;
+    for(const m of newOnes){
+      const msgRes = await authFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`);
+      if(!msgRes.ok){
+        console.error('[dossiers à distance] échec lecture du message', m.id, msgRes.status);
+        continue;
+      }
+      const msg = await msgRes.json();
+      const parsed = parseGmailMessage(msg);
+      if(parsed.attachments.length === 0){
+        console.log('[dossiers à distance] message', m.id, 'ignoré : aucune pièce jointe détectée dans le contenu');
+        continue;
+      }
+      const primaryFile = parsed.attachments.find(a => /\.(mmf|zip)$/i.test(a.filename)) || parsed.attachments[0];
+      remoteTasks.push({
+        id: m.id,
+        from: parsed.fromEmail,
+        subject: parsed.subject,
+        body: parsed.bodyText,
+        receivedAt: parsed.receivedAt,
+        attachments: parsed.attachments,
+        tool: detectTool(primaryFile.filename),
+        status: '',
+        comment: ''
+      });
+      addedAny = true;
+      console.log('[dossiers à distance] fiche ajoutée :', parsed.subject);
+    }
+    if(addedAny){
+      remoteTasks = dedupeRemoteTasks(remoteTasks); // filet de sécurité final avant l'enregistrement
+      remoteTasks.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+      await saveRemoteTasksToServer();
+      playChime();
+      renderList();
+    }
+  }catch(e){
+    console.error('[dossiers à distance] scanGmailForNewTasks a échoué :', e);
+  }finally{
+    scanningGmail = false;
+  }
+}
+
+function setRemoteStatus(id, status){
+  const matches = remoteTasks.filter(x => x.id === id); // met à jour toutes les fiches avec cet id (au cas où un doublon résiduel traîne encore)
+  if(matches.length === 0) return;
+  matches.forEach(t => t.status = status);
+  saveRemoteTasksToServer();
+  renderList();
+}
+
+function setRemoteComment(id, comment){
+  const matches = remoteTasks.filter(x => x.id === id);
+  if(matches.length === 0) return;
+  matches.forEach(t => t.comment = comment);
+  saveRemoteTasksToServer();
+  renderList();
+}
+
+async function downloadGmailAttachment(messageId, attachmentId, filename){
+  try{
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${attachmentId}`;
+    const res = await authFetch(url);
+    if(!res.ok){ alert("Impossible de récupérer le fichier pour le moment."); return; }
+    const data = await res.json();
+    const base64 = (data.data || '').replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || 'fichier';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  }catch(e){
+    alert("Impossible de récupérer le fichier pour le moment.");
+  }
+}
+
+function renderRemoteTasksHtml(){
+  const active = remoteTasks.filter(t => t.status !== 'done');
+  if(active.length === 0) return '';
+  const sorted = [...active].sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+
+  const cards = sorted.map(t => {
+    const statusLabel = t.status === 'paused' ? 'EN PAUSE' : (t.status === 'cours' ? 'EN COURS' : 'À FAIRE');
+    const dateLabel = new Date(t.receivedAt).toLocaleDateString('fr-FR', {day:'numeric', month:'short'});
+    const attachmentsHtml = (t.attachments || []).map(a => `
+      <div class="attachment-link" data-msgid="${t.id}" data-attid="${a.attachmentId}" data-filename="${escapeHtml(a.filename)}">
+        ⬇ ${escapeHtml(a.filename)}
       </div>
+    `).join('');
+    const commentHtml = t.comment ? `<div class="comment-text">"${escapeHtml(t.comment)}"</div>` : '';
+    return `
+      <div class="card ${t.status === 'paused' ? 'paused' : ''} ${t.status === 'cours' ? 'inprogress' : ''}">
+        <div class="card-top">
+          <div class="time">${dateLabel}<span>${statusLabel}</span></div>
+          <div class="body">
+            <div class="model">${escapeHtml(t.subject || '(sans objet)')}<span class="tool-tag">${escapeHtml(t.tool)}</span></div>
+            <div class="presta">${escapeHtml(t.from)}</div>
+            ${t.body ? `<div class="raw">${escapeHtml(t.body)}</div>` : ''}
+            <div class="attachments-list">${attachmentsHtml}</div>
+            ${commentHtml}
+            <div class="comment-btn" data-kind="remote" data-id="${t.id}" data-comment="${encodeURIComponent(t.comment || '')}">
+              ${t.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
+            </div>
+            <div class="comment-btn reply-btn" data-to="${encodeURIComponent(t.from)}" data-subject="${encodeURIComponent('Re: ' + (t.subject || ''))}">
+              ✉️ Répondre au mail
+            </div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="action-btn cours-btn ${t.status === 'cours' ? 'on' : ''}" data-kind="remote" data-id="${t.id}" data-active="${t.status === 'cours'}">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+            En cours
+          </button>
+          <button class="action-btn pause-btn ${t.status === 'paused' ? 'on' : ''}" data-kind="remote" data-id="${t.id}" data-active="${t.status === 'paused'}">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+            Pause
+          </button>
+          <button class="action-btn done-btn" data-kind="remote" data-id="${t.id}" data-active="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+            Fait
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="day-header">
+      <div class="label">📁 Dossiers à distance</div>
+      <div class="count">${active.length} dossier${active.length > 1 ? 's' : ''}</div>
+    </div>
+    ${cards}
+  `;
+}
+
+// Récapitulatif PDF (imprimable) de TOUS les dossiers à distance reçus dans le mois en cours (mails
+// de tes correspondants habituels, peu importe l'outil détecté — MMS ou Autotuner), avec la plaque
+// de chaque véhicule extraite de l'objet du mail. Inclut TOUS les dossiers du mois (y compris ceux
+// déjà marqués "fait"), pas seulement les dossiers encore actifs affichés dans la liste.
+function printMonthlyRemoteTasksRecap(){
+  const now = new Date();
+  const debutMois = new Date(now.getFullYear(), now.getMonth(), 1);
+  const finMois = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999); // dernier jour du mois en cours
+
+  const dossiers = remoteTasks
+    .filter(t => {
+      const d = new Date(t.receivedAt);
+      return d >= debutMois && d <= finMois;
+    })
+    .sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt));
+
+  if(dossiers.length === 0){
+    alert("Aucun dossier à distance reçu ce mois-ci.");
+    return;
+  }
+
+  const moisLabel = now.toLocaleDateString('fr-FR', {month: 'long', year: 'numeric'});
+  const dateStr = now.toLocaleDateString('fr-FR', {day:'numeric', month:'long', year:'numeric'});
+
+  // Regroupe par correspondant (ordre stable = celui de REMOTE_SENDERS ; un expéditeur imprévu,
+  // hors des 5 habituels, est placé à la fin plutôt qu'ignoré).
+  const ordreSenders = [...REMOTE_SENDERS, ''];
+  const groupes = {};
+  dossiers.forEach(t => {
+    const key = t.from || '';
+    if(!groupes[key]) groupes[key] = [];
+    groupes[key].push(t);
+  });
+  const correspondants = Object.keys(groupes).sort((a, b) => {
+    let ia = ordreSenders.indexOf(a); if(ia === -1) ia = ordreSenders.length;
+    let ib = ordreSenders.indexOf(b); if(ib === -1) ib = ordreSenders.length;
+    return ia - ib || a.localeCompare(b);
+  });
+
+  const sections = correspondants.map(from => {
+    const tasksFrom = groupes[from];
+    const rows = tasksFrom.map(t => {
+      const plaque = extractPlaque(t.subject) || '—';
+      const dateLabel = new Date(t.receivedAt).toLocaleDateString('fr-FR', {day:'numeric', month:'short'});
+      return `
+        <tr>
+          <td>${dateLabel}</td>
+          <td class="plaque">${escapeHtml(plaque)}</td>
+          <td>${escapeHtml(t.subject || '(sans objet)')}</td>
+          <td>${escapeHtml(t.tool || '')}</td>
+        </tr>
+      `;
+    }).join('');
+    return `
+      <h2>${escapeHtml(from || '(expéditeur inconnu)')} <span class="group-count">${tasksFrom.length} dossier${tasksFrom.length > 1 ? 's' : ''}</span></h2>
+      <table>
+        <thead><tr><th>Date</th><th>Plaque</th><th>Objet du mail</th><th>Outil</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     `;
-    el.appendChild(wrap);
-    el.scrollTop = el.scrollHeight;
-    wrap.querySelector('#goToStripeBtn').onclick = () => {
-      // window.top pour sortir du cadre iframe et occuper toute la fenêtre du navigateur —
-      // important pour l'expérience de paiement Stripe, pas pensée pour tenir dans un petit cadre.
-      window.top.location.href = url;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Récapitulatif dossiers à distance — ${escapeHtml(moisLabel)}</title>
+<style>
+  body{ font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding:40px; color:#1a1a1a; max-width:800px; margin:0 auto; }
+  h1{ font-size:21px; margin:0 0 4px; }
+  h2{ font-size:15px; margin:28px 0 6px; padding-top:14px; border-top:2px solid #1a1a1a; }
+  .group-count{ font-weight:400; font-size:12px; color:#888; text-transform:none; }
+  .sub{ color:#666; font-size:13px; margin-bottom:32px; }
+  table{ width:100%; border-collapse:collapse; margin-top:6px; }
+  th{ text-align:left; padding:10px 12px; background:#1a1a1a; color:#fff; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  td{ padding:10px 12px; border-bottom:1px solid #ddd; font-size:14px; }
+  td.plaque{ font-weight:700; font-family:'Courier New',monospace; letter-spacing:.05em; }
+  tr:nth-child(even){ background:#f9f9f9; }
+  .brand{ font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:#ff6a2b; font-weight:700; margin-bottom:8px; }
+  .footer{ margin-top:28px; font-size:11px; color:#999; }
+  @media print{ body{ padding:15px; } th{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } h2{ break-after:avoid; } table{ break-inside:avoid; } }
+</style>
+</head>
+<body>
+  <div class="brand">AG Sport Reprog</div>
+  <h1>Récapitulatif dossiers à distance — ${escapeHtml(moisLabel)}</h1>
+  <div class="sub">Édité le ${dateStr} — ${dossiers.length} dossier${dossiers.length > 1 ? 's' : ''}, ${correspondants.length} correspondant${correspondants.length > 1 ? 's' : ''}</div>
+  ${sections}
+  <div class="footer">Plaque extraite automatiquement de l'objet du mail — à vérifier manuellement si affichée "—".</div>
+  <script>window.onload = () => window.print();<\/script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if(w){
+    w.document.write(html);
+    w.document.close();
+  } else {
+    alert("Le navigateur a bloqué l'ouverture de la fenêtre d'impression. Autorise les pop-ups pour ce site.");
+  }
+}
+
+async function fetchEvents(){
+  const { timeMin, timeMax } = windowRange();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&timeMin=${timeMin}&timeMax=${timeMax}`;
+  const res = await authFetch(url);
+  if(!res.ok){ markConnectionLost(); return; }
+  const data = await res.json();
+  events = (data.items || []).map(mapEvent);
+
+  const newSnapshot = computeSnapshot(events);
+  if(previousSnapshot !== null && newSnapshot !== previousSnapshot){
+    playChime();
+  }
+  previousSnapshot = newSnapshot;
+
+  renderList();
+}
+
+async function patchPrivateProps(id, props, colorId, summary){
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
+  const body = { extendedProperties: { private: props } };
+  if(colorId !== undefined) body.colorId = colorId;
+  if(summary !== undefined) body.summary = summary;
+  await authFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  fetchEvents();
+}
+
+function setStatus(id, status){
+  // status: 'done' | 'paused' | '' (vide = à faire)
+  patchPrivateProps(id, { [STATUS_KEY]: status });
+}
+
+function setComment(id, comment){
+  patchPrivateProps(id, { [COMMENT_KEY]: comment });
+}
+
+function setCourtesyCar(id, value){
+  const ev = events.find(e => e.id === id);
+  const baseTitle = (ev ? ev.raw : '').replace(/ 🚗 .+$/, ''); // retire un ancien marqueur de courtoisie s'il existe
+  const newTitle = value ? `${baseTitle} 🚗 ${COURTESY_CARS[value]}` : baseTitle;
+  // colorId "6" = Tangerine (orange) dans Google Agenda ; null = remet la couleur par défaut
+  patchPrivateProps(id, { [COURTESY_CAR_KEY]: value }, value ? '6' : null, newTitle);
+}
+
+function openCourtesyModal(id, current){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const ev = events.find(e => e.id === id);
+  const dateFrom = ev ? ev.startD.toISOString().slice(0, 10) : null;
+  const dateTo = ev ? ev.endD.toISOString().slice(0, 10) : null;
+  const busyKeys = dateFrom ? getBusyCourtesyKeys(dateFrom, dateTo, id) : new Set();
+  const optionsHtml = buildCourtesyOptionsHtml(busyKeys, current);
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Véhicule de courtoisie</h3>
+      <div class="field">
+        <label>Voiture prêtée</label>
+        <select id="courtesySelect">${optionsHtml}</select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelCourtesy">Annuler</button>
+        <button class="btn-save" id="saveCourtesy">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelCourtesy').onclick = () => overlay.remove();
+  document.getElementById('saveCourtesy').onclick = () => {
+    const val = document.getElementById('courtesySelect').value;
+    overlay.remove();
+    setCourtesyCar(id, val);
+  };
+}
+
+async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate}){
+  const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
+  let summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
+  if(courtesy) summary += ` 🚗 ${COURTESY_CARS[courtesy]}`;
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
+
+  let body;
+  if(isMultiDay){
+    // Google Agenda attend une date de fin exclusive : on ajoute 1 jour au dernier jour choisi
+    const endExclusive = new Date(endDate + 'T00:00:00');
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    const endExclusiveStr = `${endExclusive.getFullYear()}-${String(endExclusive.getMonth()+1).padStart(2,'0')}-${String(endExclusive.getDate()).padStart(2,'0')}`;
+    body = {
+      summary,
+      start: { date: date },
+      end: { date: endExclusiveStr }
+    };
+  } else {
+    body = {
+      summary,
+      start: { dateTime: `${date}T${startTime}:00`, timeZone: 'Europe/Paris' },
+      end: { dateTime: `${date}T${endTime}:00`, timeZone: 'Europe/Paris' }
     };
   }
 
-  const STOCKAGE_CLE = 'agsr_conversation';
+  const res = await authFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    alert("Impossible de créer le rendez-vous. Réessaie dans quelques instants.");
+    return false;
+  }
+  const created = await res.json();
+  if(commentaire || courtesy){
+    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire || '', [COURTESY_CAR_KEY]: courtesy || '' }, courtesy ? '6' : undefined);
+  }
+  return created.id;
+}
 
-  function sauvegarderConversation(){
-    try{ localStorage.setItem(STOCKAGE_CLE, JSON.stringify(conversationMessages)); }catch(e){}
+// Estimation du prix (TTC) d'une prestation à partir de mots-clés dans le titre — utilisée par le
+// bouton "Absent" pour calculer le montant du prélèvement de 10% en cas de rendez-vous non honoré.
+const REVENUE_KEYWORDS = [
+  { keywords: ['egr'], priceTTC: 180 },
+  { keywords: ['fap'], priceTTC: 180 },
+  { keywords: ['adblue'], priceTTC: 350 },
+  { keywords: ['flexfuel', 'ethanol', 'éthanol', 'e85', 'flex'], priceTTC: 690 },
+  { keywords: ['banc'], priceTTC: 120 },
+  { keywords: ['puissance', 'reprog'], priceTTC: 500 }
+];
+function estimateRevenueTTC(title){
+  const t = (title || '').toLowerCase();
+
+  // 1. Cherche d'abord un montant écrit noir sur blanc dans le titre (plus fiable qu'une estimation par mot-clé)
+  const priceMatch = t.match(/(\d{2,5})(?:[.,](\d{1,2}))?\s*(?:€|(?:eur|euros?)\b)/);
+  if(priceMatch){
+    const entier = parseInt(priceMatch[1], 10);
+    const decimales = priceMatch[2] ? parseInt(priceMatch[2], 10) / 100 : 0;
+    return entier + decimales;
   }
 
-  // Reconstruit les bulles visibles à partir de l'historique sauvegardé (avant le passage par
-  // Stripe, qui recharge entièrement la page et efface la mémoire du widget en cours de route).
-  // Les tool_result / tool_use internes ne sont jamais réaffichés, seulement les vrais échanges.
-  function restaurerConversation(){
-    try{
-      const sauvegarde = localStorage.getItem(STOCKAGE_CLE);
-      if(!sauvegarde) return false;
-      const messages = JSON.parse(sauvegarde);
-      if(!Array.isArray(messages) || messages.length === 0) return false;
-      conversationMessages = messages;
-      messages.forEach(msg => {
-        if(msg.role === 'user' && typeof msg.content === 'string'){
-          addChatBubble('user', msg.content);
-        } else if(msg.role === 'assistant' && Array.isArray(msg.content)){
-          const textes = msg.content.filter(b => b.type === 'text').map(b => b.text);
-          if(textes.length) addChatBubble('assistant', textes.join('\n\n'));
+  // 2. Sinon, additionne le prix de CHAQUE prestation du catalogue reconnue dans le titre — un
+  // rendez-vous combiné (ex : "EGR + FAP + ADBLUE") doit compter la somme des prestations reconnues,
+  // pas seulement la première trouvée, sinon on sous-estime lourdement le CA réel de la journée.
+  let total = 0;
+  for(const entry of REVENUE_KEYWORDS){
+    if(entry.keywords.some(k => t.includes(k))) total += entry.priceTTC;
+  }
+  return total;
+}
+
+// Calcule le jour et l'heure de remise suggérés pour un véhicule gardé plusieurs jours : dépôt
+// avant 15h30 -> prêt le jour ouvré suivant à 10:15. Dépôt à 15h30 ou après -> prêt le jour ouvré
+// suivant à l'heure de fermeture de ce jour-là (le travail se fait alors le lendemain). Si le jour
+// suivant tombe un samedi/dimanche, avance jusqu'au prochain jour ouvré. Juste une suggestion pour
+// pré-remplir le champ — reste librement modifiable à la main.
+function calculerRemiseSuggeree(dateDepotStr, heureDepot){
+  const [h, m] = (heureDepot || '00:00').split(':').map(Number);
+  const minutesDepot = (h || 0) * 60 + (m || 0);
+  const SEUIL = 15 * 60 + 30; // 15h30
+  const FERMETURE = { 1: 18 * 60, 2: 18 * 60, 3: 18 * 60, 4: 18 * 60, 5: 17 * 60 }; // lun-jeu 18h, ven 17h
+
+  let d = new Date(dateDepotStr + 'T00:00:00');
+  d.setDate(d.getDate() + 1);
+  while(d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); // saute samedi/dimanche
+
+  let heureRemise;
+  if(minutesDepot < SEUIL){
+    heureRemise = '10:15';
+  } else {
+    const fermetureMin = FERMETURE[d.getDay()] || 18 * 60;
+    heureRemise = `${String(Math.floor(fermetureMin / 60)).padStart(2, '0')}:${String(fermetureMin % 60).padStart(2, '0')}`;
+  }
+  return heureRemise;
+}
+
+async function openNewEventModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  let dayOffset = 0;
+  let selectedDate = today;
+  let countsByDate = {};
+  let allUpcomingEvents = [];
+
+  overlay.innerHTML = `
+    <div class="modal modal-newevent">
+      <h3>Nouveau rendez-vous</h3>
+      <div class="newevent-columns">
+        <div class="newevent-left">
+          <div class="field required">
+            <label>Nom du client</label>
+            <input id="newNom" placeholder="ex : Mr Dupont">
+          </div>
+          <div class="field required">
+            <label>Voiture</label>
+            <input id="newVoiture" placeholder="ex : Peugeot 208 GTi">
+          </div>
+          <div class="field">
+            <label>Prestation</label>
+            <input id="newPresta" placeholder="ex : Reprog Stage 1">
+          </div>
+          <div class="field">
+            <label>Numéro de téléphone</label>
+            <input id="newNumero" placeholder="ex : 06 12 34 56 78">
+          </div>
+
+          <div class="field required">
+            <label>Date choisie</label>
+            <input id="newDate" type="date" value="${today}">
+          </div>
+
+          <label class="checkbox-row" style="margin-top:0; margin-bottom:14px;">
+            <input type="checkbox" id="newMultiDay"> Garder le véhicule plusieurs jours
+          </label>
+
+          <div id="singleDayFields">
+            <div class="field required">
+              <label>Heure de début</label>
+              <input id="newStartTime" type="time" value="09:00">
+            </div>
+            <div class="field required">
+              <label>Heure de fin</label>
+              <input id="newEndTime" type="time" value="10:00">
+            </div>
+          </div>
+          <div id="multiDayFields" style="display:none;">
+            <div class="field required">
+              <label>Jusqu'au (dernier jour inclus)</label>
+              <input id="newEndDate" type="date" value="${today}">
+            </div>
+            <div class="field">
+              <label>Heure d'arrivée (optionnel)</label>
+              <input id="newMultiArrival" type="time">
+            </div>
+            <div class="field">
+              <label>Heure de départ prévue (optionnel)</label>
+              <input id="newMultiDeparture" type="time">
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Commentaires</label>
+            <textarea id="newComment" placeholder="optionnel"></textarea>
+          </div>
+          <div class="field">
+            <label>Véhicule de courtoisie prêté</label>
+            <select id="newCourtesy">${buildCourtesyOptionsHtml(getBusyCourtesyKeys(today, today), '')}</select>
+          </div>
+        </div>
+        <div class="newevent-right">
+          <span class="mc-loading" id="mcLoading">Chargement du planning du mois...</span>
+          <div class="month-summary" id="monthSummary"></div>
+          <div class="mini-cal" id="miniCal"></div>
+          <div id="dayAgendaPanel" style="margin-top:20px;"><div class="search-hint">Chargement du planning...</div></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelNewEvent">Annuler</button>
+        <button class="btn-save" id="saveNewEvent">Créer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelNewEvent').onclick = () => overlay.remove();
+
+  function windowDates(){
+    const base = new Date();
+    const start = new Date(base.getFullYear(), base.getMonth(), base.getDate() + dayOffset * 30);
+    const days = [];
+    for(let i = 0; i < 30; i++){
+      days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+    }
+    return days;
+  }
+
+  function renderMonthSummary(){
+    const days = windowDates();
+    let totalRdv = 0;
+    let freeDays = 0;
+    days.forEach(dateObj => {
+      const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+      const count = countsByDate[dateStr] || 0;
+      totalRdv += count;
+      if(count === 0) freeDays++;
+    });
+    const summaryEl = document.getElementById('monthSummary');
+    if(summaryEl){
+      summaryEl.innerHTML = `
+        <div class="pill"><b>${totalRdv}</b> véhicule${totalRdv > 1 ? 's' : ''} sur ces 30 jours</div>
+        <div class="pill"><b>${freeDays}</b> jour${freeDays > 1 ? 's' : ''} encore libre${freeDays > 1 ? 's' : ''}</div>
+      `;
+    }
+  }
+
+  function renderMiniCal(){
+    const days = windowDates();
+    const startWeekday = (days[0].getDay() + 6) % 7; // lundi = 0
+    const rangeLabel = `${days[0].toLocaleDateString('fr-FR', {day:'numeric', month:'short'})} → ${days[29].toLocaleDateString('fr-FR', {day:'numeric', month:'short'})}`;
+
+    let cells = '';
+    for(let i = 0; i < startWeekday; i++) cells += `<div class="mc-cell mc-empty"></div>`;
+    days.forEach(dateObj => {
+      const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+      const count = countsByDate[dateStr] || 0;
+      const isSelected = dateStr === selectedDate;
+      const dayNum = dateObj.getDate();
+      const monthShort = dateObj.toLocaleDateString('fr-FR', {month:'short'});
+      cells += `<div class="mc-cell ${isSelected ? 'mc-selected' : ''} ${count > 0 ? 'mc-busy' : ''}" data-date="${dateStr}">
+        <span class="mc-day">${dayNum}<small>${monthShort}</small></span>${count > 0 ? `<span class="mc-count">${count}</span>` : ''}
+      </div>`;
+    });
+
+    document.getElementById('miniCal').innerHTML = `
+      <div class="mc-header">
+        <button type="button" class="mc-nav" id="mcPrev" ${dayOffset <= 0 ? 'disabled' : ''}>‹</button>
+        <span class="mc-title">${rangeLabel}</span>
+        <button type="button" class="mc-nav" id="mcNext">›</button>
+      </div>
+      <div class="mc-weekdays"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+      <div class="mc-grid">${cells}</div>
+    `;
+    document.getElementById('mcPrev').onclick = () => { if(dayOffset > 0){ dayOffset--; renderMiniCal(); renderMonthSummary(); } };
+    document.getElementById('mcNext').onclick = () => { dayOffset++; renderMiniCal(); renderMonthSummary(); };
+    document.querySelectorAll('.mc-cell:not(.mc-empty)').forEach(el => {
+      el.onclick = () => {
+        selectedDate = el.dataset.date;
+        document.getElementById('newDate').value = selectedDate;
+        renderMiniCal();
+        renderDayAgenda();
+      };
+    });
+  }
+
+  function renderDayAgenda(){
+    const panel = document.getElementById('dayAgendaPanel');
+    if(!panel) return;
+    const selD = new Date(selectedDate + 'T00:00:00');
+    const dayEvents = allUpcomingEvents
+      .filter(ev => {
+        if(ev.isMultiDay){
+          const startD = new Date(ev.start + 'T00:00:00');
+          const endD = new Date(ev.end); // borne exclusive
+          return selD >= startD && selD < endD;
         }
-      });
-      return true;
-    }catch(e){
-      return false;
+        return ev.dateStr === selectedDate;
+      })
+      .sort((a, b) => (a.start || '').localeCompare(b.start || ''));
+    const dateLabel = new Date(selectedDate + 'T00:00:00').toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+    if(dayEvents.length === 0){
+      panel.innerHTML = `<div class="day-agenda-title">${dateLabel}</div><div class="search-hint">Aucun rendez-vous ce jour — journée libre.</div>`;
+      return;
     }
+    panel.innerHTML = `
+      <div class="day-agenda-title">${dateLabel} — ${dayEvents.length} RDV déjà pris</div>
+      ${dayEvents.map(ev => {
+        const parts = parseParts(ev.raw);
+        const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
+        const timeLabel = ev.allDay ? (ev.isMultiDay ? 'Plsrs jours' : 'Jour entier') : `${fmtTime(ev.start)} → ${fmtTime(ev.end)}`;
+        const courtesyTag = ev.courtesyCar ? `<span class="sr-courtesy">🚗 ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</span>` : '';
+        return `
+          <div class="search-result ${ev.isMultiDay ? 'multiday' : ''}">
+            <div class="sr-date">${timeLabel}</div>
+            <div class="sr-body"><div class="sr-title">${escapeHtml(label)}</div>${courtesyTag}</div>
+          </div>
+        `;
+      }).join('')}
+    `;
   }
 
-  async function sendMessage(text){
-    if(!text.trim()) return;
-    addChatBubble('user', text);
-    conversationMessages.push({ role: 'user', content: text });
-    sauvegarderConversation();
-    document.getElementById('chatInput').value = '';
-    document.getElementById('chatSendBtn').disabled = true;
-    const loadingBubble = addChatInfo('...réflexion...');
-
-    try{
-      const res = await fetch(PUBLIC_BOOKING_WORKER_URL, {
-        method: 'POST',
-        headers: { 'X-Auth-Key': PUBLIC_BOOKING_ACCESS_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: conversationMessages })
-      });
-      loadingBubble.remove();
-      const data = await res.json();
-      if(!res.ok || data.error){
-        addChatInfo("Un problème est survenu. Contactez-nous directement au 07 69 37 70 92.");
-        return;
-      }
-      if(data.messages) conversationMessages = data.messages; // historique complet tenu à jour par le serveur
-      sauvegarderConversation();
-      if(data.reply) addChatBubble('assistant', data.reply);
-      if(data.checkoutUrl) showCheckoutButton(data.checkoutUrl);
-    }catch(e){
-      loadingBubble.remove();
-      addChatInfo("Connexion impossible pour le moment. Contactez-nous directement au 07 69 37 70 92.");
-    }finally{
-      document.getElementById('chatSendBtn').disabled = false;
+  document.getElementById('newDate').addEventListener('change', (e) => {
+    selectedDate = e.target.value;
+    renderMiniCal();
+    renderDayAgenda();
+    const endDateInput = document.getElementById('newEndDate');
+    if(endDateInput){
+      endDateInput.min = e.target.value;
+      if(endDateInput.value < e.target.value) endDateInput.value = e.target.value;
     }
-  }
-
-  document.getElementById('chatSendBtn').onclick = () => sendMessage(document.getElementById('chatInput').value);
-  document.getElementById('chatInput').addEventListener('keydown', (e) => {
-    if(e.key === 'Enter') sendMessage(document.getElementById('chatInput').value);
   });
 
-  // Retour depuis Stripe Checkout (voir success_url/cancel_url dans le Worker) : le site parent
-  // rouvre ce widget avec ?confirme=1 ou ?annule=1 dans l'URL. La page a été entièrement rechargée
-  // pour aller sur Stripe et revenir, donc la conversation est restaurée depuis localStorage
-  // plutôt que de repartir à zéro — la confirmation s'ajoute à la suite de l'échange précédent.
-  const params = new URLSearchParams(window.location.search);
-  if(params.get('confirme') === '1'){
-    restaurerConversation();
-    addChatBubble('assistant', "✅ Empreinte bancaire réussie, je vous confirme le rendez-vous ! Nous vous attendons à l'atelier.");
-    localStorage.removeItem(STOCKAGE_CLE);
-  } else if(params.get('annule') === '1'){
-    restaurerConversation();
-    addChatBubble('assistant', "Pas de souci, vous n'avez pas terminé l'enregistrement de la carte — le rendez-vous n'est donc pas encore confirmé. Vous pouvez réessayer, ou me poser une question.");
-  } else {
-    addChatBubble('assistant', "Bienvenue chez AG Sport Reprog ! Je suis là pour vous conseiller et prendre votre rendez-vous.");
+  document.getElementById('newMultiDay').addEventListener('change', (e) => {
+    document.getElementById('singleDayFields').style.display = e.target.checked ? 'none' : '';
+    document.getElementById('multiDayFields').style.display = e.target.checked ? '' : 'none';
+    refreshCourtesyAvailability();
+  });
+
+  function refreshCourtesyAvailability(){
+    const sel = document.getElementById('newCourtesy');
+    const currentValue = sel.value;
+    const isMulti = document.getElementById('newMultiDay').checked;
+    const dateFrom = document.getElementById('newDate').value;
+    const dateTo = isMulti ? document.getElementById('newEndDate').value : dateFrom;
+    if(!dateFrom) return;
+    sel.innerHTML = buildCourtesyOptionsHtml(getBusyCourtesyKeys(dateFrom, dateTo), currentValue);
   }
+  document.getElementById('newDate').addEventListener('change', refreshCourtesyAvailability);
+  document.getElementById('newEndDate').addEventListener('change', refreshCourtesyAvailability);
+
+  function suggererHeureDepart(){
+    const dateDepot = document.getElementById('newDate').value;
+    const heureDepot = document.getElementById('newMultiArrival').value;
+    if(!dateDepot || !heureDepot) return;
+    document.getElementById('newMultiDeparture').value = calculerRemiseSuggeree(dateDepot, heureDepot);
+  }
+  document.getElementById('newMultiArrival').addEventListener('change', suggererHeureDepart);
+  document.getElementById('newDate').addEventListener('change', suggererHeureDepart);
+
+  renderMiniCal();
+  renderDayAgenda();
+
+  // Charge les rendez-vous des 3 prochains mois : compte par jour + détail pour le jour sélectionné
+  try{
+    const timeMin = now.toISOString();
+    const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events?singleEvents=true&orderBy=startTime&maxResults=2500&timeMin=${timeMin}&timeMax=${timeMax}`;
+    const res = await authFetch(url);
+    if(res.ok){
+      const data = await res.json();
+      allUpcomingEvents = (data.items || []).map(ev => {
+        const startRaw = ev.start?.dateTime || ev.start?.date;
+        const endRaw = ev.end?.dateTime || ev.end?.date;
+        const allDay = !ev.start?.dateTime;
+        const isMultiDay = allDay && endRaw && startRaw && (new Date(endRaw) - new Date(startRaw)) > 24 * 3600 * 1000;
+        return {
+          id: ev.id,
+          start: startRaw,
+          end: endRaw,
+          allDay,
+          isMultiDay,
+          raw: ev.summary || '',
+          dateStr: (startRaw || '').slice(0, 10),
+          courtesyCar: ev.extendedProperties?.private?.[COURTESY_CAR_KEY] || ''
+        };
+      });
+      countsByDate = {};
+      allUpcomingEvents.forEach(ev => {
+        if(ev.isMultiDay){
+          let d = new Date(ev.start + 'T00:00:00');
+          const endD = new Date(ev.end);
+          while(d < endD){
+            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            countsByDate[key] = (countsByDate[key] || 0) + 1;
+            d.setDate(d.getDate() + 1);
+          }
+        } else {
+          countsByDate[ev.dateStr] = (countsByDate[ev.dateStr] || 0) + 1;
+        }
+      });
+    }
+  }catch(e){}
+  const loadingEl = document.getElementById('mcLoading');
+  if(loadingEl) loadingEl.remove();
+  renderMiniCal();
+  renderMonthSummary();
+  renderDayAgenda();
+
+  document.getElementById('saveNewEvent').onclick = async () => {
+    const nom = document.getElementById('newNom').value.trim();
+    const voiture = document.getElementById('newVoiture').value.trim();
+    const presta = document.getElementById('newPresta').value.trim();
+    const numero = document.getElementById('newNumero').value.trim();
+    let commentaire = document.getElementById('newComment').value.trim();
+    const courtesy = document.getElementById('newCourtesy').value;
+    const date = document.getElementById('newDate').value;
+    const isMultiDay = document.getElementById('newMultiDay').checked;
+    const startTime = document.getElementById('newStartTime').value;
+    const endTime = document.getElementById('newEndTime').value;
+    const endDate = document.getElementById('newEndDate').value;
+    const multiArrival = document.getElementById('newMultiArrival').value;
+    const multiDeparture = document.getElementById('newMultiDeparture').value;
+    if(!nom || !voiture || !date){
+      alert('Renseigne au moins le nom, la voiture et la date.');
+      return;
+    }
+    if(isMultiDay && !endDate){
+      alert('Renseigne le dernier jour de garde du véhicule.');
+      return;
+    }
+    if(!isMultiDay && (!startTime || !endTime)){
+      alert('Renseigne les horaires de début et de fin.');
+      return;
+    }
+    if(isMultiDay && (multiArrival || multiDeparture)){
+      // L'événement reste "journée entière" dans l'agenda (aucun changement pour le calcul de
+      // disponibilité ailleurs) — les heures précises sont juste notées dans le commentaire.
+      const notes = [];
+      if(multiArrival) notes.push(`Dépôt à ${multiArrival}`);
+      if(multiDeparture) notes.push(`récupération prévue à ${multiDeparture}`);
+      const noteHoraires = notes.join(', ') + '.';
+      commentaire = commentaire ? `${noteHoraires} ${commentaire}` : noteHoraires;
+    }
+    const saveBtn = document.getElementById('saveNewEvent');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Création...';
+    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate});
+    if(ok){
+      overlay.remove();
+      fetchEvents();
+    } else {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Créer';
+    }
+  };
+}
+
+function setPerf(id, values){
+  patchPrivateProps(id, {
+    [PERF_BEFORE_KEY]: values.before,
+    [PERF_AFTER_KEY]: values.after,
+    [PERF060_BEFORE_KEY]: values.before060,
+    [PERF060_AFTER_KEY]: values.after060,
+    [PERF_HP_BEFORE_KEY]: values.hpBefore,
+    [PERF_HP_AFTER_KEY]: values.hpAfter,
+    [PERF_TORQUE_BEFORE_KEY]: values.torqueBefore,
+    [PERF_TORQUE_AFTER_KEY]: values.torqueAfter
+  });
+}
+
+function printPerfReport(ev){
+  const before = ev.perfBefore || '';
+  const after = ev.perfAfter || '';
+  const before060 = ev.perf060Before || '';
+  const after060 = ev.perf060After || '';
+  const gainOf = (b, a) => {
+    const bn = parseFloat((b || '').replace(',', '.'));
+    const an = parseFloat((a || '').replace(',', '.'));
+    return (!isNaN(bn) && !isNaN(an)) ? `${(bn - an).toFixed(2)} s` : '—';
+  };
+  const gainPlusOf = (b, a, unit) => {
+    const bn = parseFloat((b || '').replace(',', '.'));
+    const an = parseFloat((a || '').replace(',', '.'));
+    return (!isNaN(bn) && !isNaN(an)) ? `+${(an - bn).toFixed(0)} ${unit}` : '—';
+  };
+  const dateStr = new Date().toLocaleDateString('fr-FR', {day:'numeric', month:'long', year:'numeric'});
+
+  const rows060 = (before060 || after060) ? `
+    <tr><td class="label">0-60 km/h d'origine</td><td>${escapeHtml(before060 || '—')}</td></tr>
+    <tr><td class="label">0-60 km/h après reprogrammation</td><td>${escapeHtml(after060 || '—')}</td></tr>
+    <tr class="gain-row"><td class="label">Gain 0-60</td><td>${gainOf(before060, after060)}</td></tr>
+  ` : '';
+
+  const rowsPower = (ev.hpBefore || ev.hpAfter || ev.torqueBefore || ev.torqueAfter) ? `
+    <tr><td class="label">Puissance d'origine (approx.)</td><td>${escapeHtml(ev.hpBefore || '—')} ch</td></tr>
+    <tr><td class="label">Puissance après reprogrammation (approx.)</td><td>${escapeHtml(ev.hpAfter || '—')} ch</td></tr>
+    <tr class="gain-row"><td class="label">Gain puissance</td><td>${gainPlusOf(ev.hpBefore, ev.hpAfter, 'ch')}</td></tr>
+    <tr><td class="label">Couple d'origine (approx.)</td><td>${escapeHtml(ev.torqueBefore || '—')} Nm</td></tr>
+    <tr><td class="label">Couple après reprogrammation (approx.)</td><td>${escapeHtml(ev.torqueAfter || '—')} Nm</td></tr>
+    <tr class="gain-row"><td class="label">Gain couple</td><td>${gainPlusOf(ev.torqueBefore, ev.torqueAfter, 'Nm')}</td></tr>
+  ` : '';
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Rapport de performance</title>
+<style>
+  body{ font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; padding:40px; color:#1a1a1a; max-width:650px; margin:0 auto; }
+  h1{ font-size:21px; margin:0 0 4px; }
+  .sub{ color:#666; font-size:13px; margin-bottom:32px; }
+  table{ width:100%; border-collapse:collapse; margin-top:10px; }
+  td{ padding:14px 16px; border:1px solid #ddd; font-size:15px; }
+  td.label{ background:#f4f4f4; font-weight:600; width:50%; }
+  tr.gain-row td{ background:#ff6a2b; color:#fff; font-weight:700; }
+  tr.gain-row td.label{ background:#e55a1c; }
+  .brand{ font-size:14px; letter-spacing:.08em; text-transform:uppercase; color:#ff6a2b; font-weight:700; margin-bottom:8px; }
+  .footer{ margin-top:36px; font-size:11px; color:#999; line-height:1.5; }
+  @media print{ body{ padding:15px; } tr.gain-row td{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style>
+</head>
+<body>
+  <div class="brand">AG Sport Reprog</div>
+  <h1>Rapport de performance — Augmentation de puissance</h1>
+  <div class="sub">Édité le ${dateStr}</div>
+  <table>
+    ${rows060}
+    <tr><td class="label">0-100 km/h d'origine</td><td>${escapeHtml(before || '—')}</td></tr>
+    <tr><td class="label">0-100 km/h après reprogrammation</td><td>${escapeHtml(after || '—')}</td></tr>
+    <tr class="gain-row"><td class="label">Gain 0-100</td><td>${gainOf(before, after)}</td></tr>
+    ${rowsPower}
+  </table>
+  <div class="footer">Mesures effectuées à l'aide d'un récepteur GPS (Dragy ou équivalent). Valeurs de puissance et couple approximatives (estimation atelier, non certifiées banc de puissance). Résultats donnés à titre indicatif, pouvant varier selon les conditions (météo, revêtement, charge du véhicule).</div>
+  <script>window.onload = () => window.print();<\/script>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if(w){
+    w.document.write(html);
+    w.document.close();
+  } else {
+    alert("Le navigateur a bloqué l'ouverture de la fenêtre d'impression. Autorise les pop-ups pour ce site.");
+  }
+}
+
+function openPerfModal(id, data){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Performances (approximatif)</h3>
+      <div class="field">
+        <label>0-60 km/h d'origine</label>
+        <input id="perf060BeforeInput" placeholder="ex : 3.9s" value="${escapeHtml(data.before060 || '')}">
+      </div>
+      <div class="field">
+        <label>0-60 km/h après augmentation de puissance</label>
+        <input id="perf060AfterInput" placeholder="ex : 3.4s" value="${escapeHtml(data.after060 || '')}">
+      </div>
+      <div class="field">
+        <label>0-100 km/h d'origine</label>
+        <input id="perfBeforeInput" placeholder="ex : 6.8s" value="${escapeHtml(data.before || '')}">
+      </div>
+      <div class="field">
+        <label>0-100 km/h après augmentation de puissance</label>
+        <input id="perfAfterInput" placeholder="ex : 5.9s" value="${escapeHtml(data.after || '')}">
+      </div>
+      <div class="field">
+        <label>Puissance d'origine (ch, approx.)</label>
+        <input id="hpBeforeInput" placeholder="ex : 150" value="${escapeHtml(data.hpBefore || '')}">
+      </div>
+      <div class="field">
+        <label>Puissance après augmentation (ch, approx.)</label>
+        <input id="hpAfterInput" placeholder="ex : 175" value="${escapeHtml(data.hpAfter || '')}">
+      </div>
+      <div class="field">
+        <label>Couple d'origine (Nm, approx.)</label>
+        <input id="torqueBeforeInput" placeholder="ex : 320" value="${escapeHtml(data.torqueBefore || '')}">
+      </div>
+      <div class="field">
+        <label>Couple après augmentation (Nm, approx.)</label>
+        <input id="torqueAfterInput" placeholder="ex : 380" value="${escapeHtml(data.torqueAfter || '')}">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelPerf">Annuler</button>
+        <button class="btn-save" id="savePerf">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelPerf').onclick = () => overlay.remove();
+  document.getElementById('savePerf').onclick = () => {
+    const values = {
+      before: document.getElementById('perfBeforeInput').value.trim(),
+      after: document.getElementById('perfAfterInput').value.trim(),
+      before060: document.getElementById('perf060BeforeInput').value.trim(),
+      after060: document.getElementById('perf060AfterInput').value.trim(),
+      hpBefore: document.getElementById('hpBeforeInput').value.trim(),
+      hpAfter: document.getElementById('hpAfterInput').value.trim(),
+      torqueBefore: document.getElementById('torqueBeforeInput').value.trim(),
+      torqueAfter: document.getElementById('torqueAfterInput').value.trim()
+    };
+    overlay.remove();
+    setPerf(id, values);
+  };
+}
+
+function parseParts(raw){
+  const cleaned = (raw || '').replace(/ 🚗 .+$/, '');
+  const parts = cleaned.split('|').map(s => s.trim()).filter(Boolean);
+  if(parts.length >= 2){
+    return { model: parts[0], presta: parts[1] || '', phone: parts[2] || '' };
+  }
+  return null;
+}
+
+function fmtTime(dtStr){
+  if(!dtStr) return '--:--';
+  if(dtStr.length === 10) return 'Jour';
+  const d = new Date(dtStr);
+  return d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+}
+
+function fmtRange(ev){
+  if(ev.allDay) return 'Jour';
+  const start = fmtTime(ev.start);
+  const end = fmtTime(ev.end);
+  return `${start}<span class="arrow">→</span>${end}`;
+}
+
+function renderList(){
+  const activeEvents = events.filter(e => !e.paused);
+  const doneCount = activeEvents.filter(e => e.done).length;
+  const pausedCount = events.filter(e => e.paused).length;
+  const today = new Date();
+  const todayKey = dayKey(today);
+  const headerDate = today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+  // construit les jours de la fenêtre (3 par défaut, jusqu'à 31 en vue mois)
+  const days = [];
+  for(let i = 0; i < joursAffiches(); i++){
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    days.push(d);
+  }
+
+  let listHtml = '';
+  days.forEach(d => {
+    const key = dayKey(d);
+    const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59);
+    // un événement apparaît ce jour-là s'il couvre ce jour (gère les véhicules gardés plusieurs jours)
+    const dayEvents = events
+      .filter(ev => ev.startD <= dEnd && ev.endD >= d)
+      .sort((a, b) => a.startD - b.startD);
+
+    const isToday = key === todayKey;
+    const label = isToday ? "Aujourd'hui" : d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+
+    // les véhicules "en pause" ne comptent pas dans les compteurs
+    const countedEvents = dayEvents.filter(ev => !ev.paused);
+
+    let cardsHtml;
+    if(dayEvents.length === 0){
+      cardsHtml = `<div class="empty" style="padding:24px 20px"><div class="big">Rien de prévu</div></div>`;
+    } else {
+      cardsHtml = dayEvents.map(ev => {
+        const parts = parseParts(ev.raw);
+        const spansMultiple = dayKey(ev.startD) !== dayKey(ev.endD);
+        const body = parts
+          ? `<div class="model">${escapeHtml(parts.model)}</div>
+             <div class="presta">${escapeHtml(parts.presta)}</div>
+             ${parts.phone ? `<div class="phone">${escapeHtml(parts.phone)}</div>` : ''}
+             ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`
+          : `<div class="raw">${escapeHtml(ev.raw)}</div>
+             ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`;
+        const statusLabel = ev.done ? 'FAIT' : (ev.paused ? 'EN PAUSE' : (ev.inProgress ? 'EN COURS' : 'PRÉVU'));
+        const commentHtml = ev.comment
+          ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>`
+          : '';
+        const hasPerf = ev.perfBefore || ev.perfAfter || ev.perf060Before || ev.perf060After || ev.hpBefore || ev.hpAfter || ev.torqueBefore || ev.torqueAfter;
+        const perfLines = [];
+        if(ev.perf060Before || ev.perf060After) perfLines.push(`0-60 : ${escapeHtml(ev.perf060Before || '—')} → ${escapeHtml(ev.perf060After || '—')}`);
+        if(ev.perfBefore || ev.perfAfter) perfLines.push(`0-100 : ${escapeHtml(ev.perfBefore || '—')} → ${escapeHtml(ev.perfAfter || '—')}`);
+        if(ev.hpBefore || ev.hpAfter) perfLines.push(`🐎 ${escapeHtml(ev.hpBefore || '—')} → ${escapeHtml(ev.hpAfter || '—')} ch`);
+        if(ev.torqueBefore || ev.torqueAfter) perfLines.push(`Couple ${escapeHtml(ev.torqueBefore || '—')} → ${escapeHtml(ev.torqueAfter || '—')} Nm`);
+        const perfData = encodeURIComponent(JSON.stringify({
+          before: ev.perfBefore, after: ev.perfAfter, before060: ev.perf060Before, after060: ev.perf060After,
+          hpBefore: ev.hpBefore, hpAfter: ev.hpAfter, torqueBefore: ev.torqueBefore, torqueAfter: ev.torqueAfter
+        }));
+        const perfHtml = `
+          ${hasPerf ? `<div class="perf-summary">⏱ ${perfLines.join(' · ')}</div>` : ''}
+          <div class="perf-actions">
+            <div class="comment-btn perf-edit-btn" data-id="${ev.id}" data-perf="${perfData}">
+              ${hasPerf ? '⏱ Modifier les performances' : '⏱ Ajouter les performances'}
+            </div>
+            ${hasPerf ? `<div class="comment-btn perf-print-btn" data-id="${ev.id}">🖨️ Imprimer PDF</div>` : ''}
+          </div>
+        `;
+        const courtesyHtml = ev.courtesyCar ? `<div class="courtesy-badge">🚗 Courtoisie : ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</div>` : '';
+        const paymentBadgeHtml = ev.paymentStatus === 'en_attente' ? `<div class="payment-pending-badge">⏳ Carte non encore enregistrée</div>`
+          : ev.paymentStatus === 'confirme' ? `<div class="payment-confirmed-badge">✅ Empreinte enregistrée</div>` : '';
+        // Bouton "Absent" volontairement à l'écart des boutons de statut (En cours/Pause/Fait) pour
+        // qu'il ne soit jamais cliqué par erreur — seulement visible si une carte a bien été
+        // enregistrée pour ce RDV (donc un prélèvement est possible).
+        const noShowHtml = ev.stripeCustomerId ? `
+            <div class="noshow-row">
+              <button class="noshow-btn ${ev.noShowCharged ? 'charged' : ''}" data-id="${ev.id}" data-charged="${ev.noShowCharged}" ${ev.noShowCharged ? 'disabled' : ''}>
+                ${ev.noShowCharged ? '✓ 10% prélevé (absent)' : 'Absent — prélever 10%'}
+              </button>
+            </div>` : '';
+        return `
+          <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''} ${ev.inProgress ? 'inprogress' : ''} ${ev.courtesyCar ? 'has-courtesy' : ''}">
+            <div class="card-top">
+              <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
+              <div class="body">
+                ${body}
+                ${paymentBadgeHtml}
+                ${commentHtml}
+                <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
+                  ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
+                </div>
+                ${perfHtml}
+                ${courtesyHtml}
+                <div class="comment-btn courtesy-edit-btn" data-id="${ev.id}" data-current="${encodeURIComponent(ev.courtesyCar || '')}">
+                  ${ev.courtesyCar ? '🚗 Modifier le véhicule de courtoisie' : '🚗 Prêter un véhicule de courtoisie'}
+                </div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="action-btn cours-btn ${ev.inProgress ? 'on' : ''}" data-id="${ev.id}" data-active="${ev.inProgress}">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+                En cours
+              </button>
+              <button class="action-btn pause-btn ${ev.paused ? 'on' : ''}" data-id="${ev.id}" data-active="${ev.paused}">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+                Pause
+              </button>
+              <button class="action-btn done-btn ${ev.done ? 'on' : ''}" data-id="${ev.id}" data-active="${ev.done}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l5 5L20 7"/></svg>
+                Fait
+              </button>
+            </div>
+            ${noShowHtml}
+          </div>`;
+      }).join('');
+    }
+
+    listHtml += `
+      <div class="day-header">
+        <div class="label">${label}</div>
+        ${isToday ? '<div class="today-tag">Aujourd\'hui</div>' : ''}
+        <div class="count">${countedEvents.length} véhicule${countedEvents.length > 1 ? 's' : ''}</div>
+      </div>
+      ${cardsHtml}
+    `;
+  });
+
+  app.innerHTML = `
+    <div class="topbar">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>
+          <h1>Atelier · Planning</h1>
+          <div class="date">${headerDate}</div>
+        </div>
+      </div>
+      <div class="suite-tabs">
+        <a href="./" class="tab-link active">📅 Planning</a>
+        <a href="stock-calculateurs.html" class="tab-link">📦 Stock</a>
+      </div>
+      <div class="status">
+        ${connectionLost
+          ? `<button id="reconnectBtn" class="reconnect-btn"><span class="led lost"></span>Relais indisponible · nouvelle tentative automatique...</button>`
+          : `<div class="led live"></div>Synchronisé`
+        }
+        <button id="searchBtn">🔍 Rechercher</button>
+        <button id="newEventBtn">+ Nouveau RDV</button>
+        <label class="checkbox-row" style="margin:0 4px;">
+          <input type="checkbox" id="vueMoisCheck" ${vueMois ? 'checked' : ''}> Voir le mois
+        </label>
+        <button id="refreshBtn">↻ Actualiser</button>
+        <button id="scanMailBtn">📧 Vérifier les mails</button>
+        <button id="slaveRecapBtn">📋 Récap du mois</button>
+        <button id="settingsBtn">⚙</button>
+      </div>
+    </div>
+    <div class="counts">
+      <div class="pill"><b>${activeEvents.length}</b> véhicules (${vueMois ? '31 jours' : '3 jours'})</div>
+      <div class="pill"><b>${doneCount}</b> terminés</div>
+      <div class="pill"><b>${activeEvents.length - doneCount}</b> restants</div>
+      ${pausedCount > 0 ? `<div class="pill"><b>${pausedCount}</b> en pause</div>` : ''}
+    </div>
+    <div class="list">${renderRemoteTasksHtml()}${listHtml}</div>
+  `;
+
+  if(connectionLost){
+    document.getElementById('reconnectBtn').onclick = async () => {
+      const ok = await getAccessToken();
+      if(ok) fetchEvents();
+    };
+  }
+  document.getElementById('refreshBtn').onclick = fetchEvents;
+  document.getElementById('scanMailBtn').onclick = () => {
+    console.log('[dossiers à distance] vérification manuelle déclenchée');
+    scanGmailForNewTasks();
+  };
+  document.getElementById('slaveRecapBtn').onclick = printMonthlyRemoteTasksRecap;
+  document.getElementById('searchBtn').onclick = openSearchModal;
+  document.getElementById('newEventBtn').onclick = openNewEventModal;
+  document.getElementById('vueMoisCheck').onchange = (e) => {
+    vueMois = e.target.checked;
+    fetchEvents();
+  };
+  document.getElementById('settingsBtn').onclick = renderSetup;
+  document.querySelectorAll('.cours-btn').forEach(el => {
+    el.onclick = () => {
+      if(el.dataset.kind === 'remote') setRemoteStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
+      else setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'cours' : '');
+    };
+  });
+  document.querySelectorAll('.pause-btn').forEach(el => {
+    el.onclick = () => {
+      if(el.dataset.kind === 'remote') setRemoteStatus(el.dataset.id, el.dataset.active !== 'true' ? 'paused' : '');
+      else setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'paused' : '');
+    };
+  });
+  document.querySelectorAll('.done-btn').forEach(el => {
+    el.onclick = () => {
+      if(el.dataset.kind === 'remote') setRemoteStatus(el.dataset.id, 'done');
+      else setStatus(el.dataset.id, el.dataset.active !== 'true' ? 'done' : '');
+    };
+  });
+  document.querySelectorAll('.comment-btn').forEach(el => {
+    el.onclick = () => openCommentModal(el.dataset.id, decodeURIComponent(el.dataset.comment), el.dataset.kind === 'remote' ? 'remote' : 'event');
+  });
+  document.querySelectorAll('.noshow-btn').forEach(el => {
+    if(el.dataset.charged === 'true') return; // déjà prélevé, pas de handler (bouton désactivé)
+    el.onclick = async () => {
+      const ev = events.find(e => e.id === el.dataset.id);
+      if(!ev) return;
+      const montantTTC = estimateRevenueTTC(ev.raw);
+      const montant10 = montantTTC ? (montantTTC * 0.10).toFixed(2) : '?';
+      if(!confirm(`Confirmer le prélèvement de 10% (${montant10}€) pour rendez-vous non honoré ? Cette action débite réellement la carte enregistrée.`)) return;
+      el.disabled = true;
+      el.textContent = 'Prélèvement...';
+      try{
+        const res = await fetchWithTimeout(config.stripePaymentsWorkerUrl, {
+          method: 'POST',
+          headers: { 'X-Auth-Key': config.stripePaymentsAccessKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'charge_noshow',
+            eventId: ev.id,
+            stripeCustomerId: ev.stripeCustomerId,
+            stripePaymentMethodId: ev.stripePaymentMethodId,
+            amountCents: Math.round(montantTTC * 0.10 * 100)
+          })
+        }, 20000);
+        const data = await res.json();
+        if(!res.ok || !data.success) throw new Error(data.error || 'Échec du prélèvement');
+        await patchPrivateProps(ev.id, { [NOSHOW_CHARGED_KEY]: 'true' });
+        fetchEvents();
+      }catch(e){
+        alert("Le prélèvement a échoué : " + e.message);
+        el.disabled = false;
+        el.textContent = 'Absent — prélever 10%';
+      }
+    };
+  });
+  document.querySelectorAll('.attachment-link').forEach(el => {
+    el.onclick = () => downloadGmailAttachment(el.dataset.msgid, el.dataset.attid, el.dataset.filename);
+  });
+  document.querySelectorAll('.reply-btn').forEach(el => {
+    el.onclick = () => {
+      const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${el.dataset.to}&su=${el.dataset.subject}`;
+      window.open(url, '_blank');
+    };
+  });
+  document.querySelectorAll('.perf-edit-btn').forEach(el => {
+    el.onclick = () => openPerfModal(el.dataset.id, JSON.parse(decodeURIComponent(el.dataset.perf)));
+  });
+  document.querySelectorAll('.perf-print-btn').forEach(el => {
+    el.onclick = () => {
+      const ev = events.find(e => e.id === el.dataset.id);
+      if(ev) printPerfReport(ev);
+    };
+  });
+  document.querySelectorAll('.courtesy-edit-btn').forEach(el => {
+    el.onclick = () => openCourtesyModal(el.dataset.id, decodeURIComponent(el.dataset.current));
+  });
+}
+
+function setupVoiceInput(button, textarea){
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SpeechRecognition){
+    button.style.display = 'none'; // non pris en charge par ce navigateur
+    return;
+  }
+  let recognition = null;
+  let listening = false;
+
+  button.onclick = () => {
+    if(listening){
+      recognition.stop();
+      return;
+    }
+    recognition = new SpeechRecognition();
+    recognition.lang = 'fr-FR';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      listening = true;
+      button.classList.add('listening');
+    };
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      const sep = textarea.value.trim() ? ' ' : '';
+      textarea.value = textarea.value.trim() + sep + transcript;
+      textarea.focus();
+    };
+    recognition.onerror = () => {
+      listening = false;
+      button.classList.remove('listening');
+    };
+    recognition.onend = () => {
+      listening = false;
+      button.classList.remove('listening');
+    };
+    recognition.start();
+  };
+}
+
+function openCommentModal(id, currentComment, kind = 'event'){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Commentaire sur ${kind === 'remote' ? 'ce dossier' : 'ce rendez-vous'}</h3>
+      <div class="textarea-wrap">
+        <textarea id="commentInput" placeholder="Ex : plaquettes changées, prévoir contrôle dans 15 jours...">${escapeHtml(currentComment || '')}</textarea>
+        <button type="button" id="voiceBtn" class="voice-btn" title="Dictée vocale">🎤</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelComment">Annuler</button>
+        <button class="btn-save" id="saveComment">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('cancelComment').onclick = () => overlay.remove();
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('saveComment').onclick = () => {
+    const val = document.getElementById('commentInput').value.trim();
+    overlay.remove();
+    if(kind === 'remote') setRemoteComment(id, val);
+    else setComment(id, val);
+  };
+  setupVoiceInput(document.getElementById('voiceBtn'), document.getElementById('commentInput'));
+}
+
+function openSearchModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal modal-search">
+      <h3>Rechercher un véhicule</h3>
+      <input type="text" id="searchInput" placeholder="Modèle, nom, téléphone...">
+      <div id="searchResults" class="search-results">
+        <div class="search-hint">Tape un mot-clé (modèle, téléphone...) et appuie sur Entrée.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="closeSearch">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('closeSearch').onclick = () => overlay.remove();
+  const input = document.getElementById('searchInput');
+  input.focus();
+  input.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') runSearch(input.value.trim());
+  });
+}
+
+async function runSearch(query){
+  const resultsEl = document.getElementById('searchResults');
+  if(!query){ return; }
+  resultsEl.innerHTML = `<div class="search-hint">Recherche en cours...</div>`;
+
+  // recherche immédiate dans les dossiers à distance déjà chargés (pas de requête réseau nécessaire)
+  const q = query.toLowerCase();
+  const remoteMatches = remoteTasks.filter(t => {
+    const hay = `${t.subject} ${t.body} ${t.from} ${(t.attachments || []).map(a => a.filename).join(' ')}`.toLowerCase();
+    return hay.includes(q);
+  }).map(t => ({
+    date: new Date(t.receivedAt),
+    html: `
+      <div class="search-result">
+        <div class="sr-date">${new Date(t.receivedAt).toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'})}</div>
+        <div class="sr-body">
+          <div class="sr-title">📁 ${escapeHtml(t.subject || '(sans objet)')}</div>
+          <div class="sr-phone">${escapeHtml(t.from)}</div>
+          ${t.comment ? `<div class="comment-text">"${escapeHtml(t.comment)}"</div>` : ''}
+        </div>
+        <div class="sr-status">${t.status === 'done' ? 'Fait' : (t.status === 'paused' ? 'En pause' : (t.status === 'cours' ? 'En cours' : 'À faire'))}</div>
+      </div>
+    `
+  }));
+
+  // recherche sur une large plage d'agenda : 2 ans en arrière jusqu'à 3 mois à l'avance
+  const now = new Date();
+  const timeMin = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()).toISOString();
+  const timeMax = new Date(now.getFullYear(), now.getMonth() + 3, now.getDate()).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`
+    + `?singleEvents=true&orderBy=startTime&maxResults=50&q=${encodeURIComponent(query)}`
+    + `&timeMin=${timeMin}&timeMax=${timeMax}`;
+  const res = await authFetch(url);
+  let eventMatches = [];
+  if(res.ok){
+    const data = await res.json();
+    eventMatches = (data.items || []).map(mapEvent).map(ev => {
+      const parts = parseParts(ev.raw);
+      const label = parts ? `${parts.model} — ${parts.presta}` : ev.raw;
+      const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : (ev.inProgress ? 'En cours' : 'Prévu'));
+      return {
+        date: ev.startD,
+        html: `
+          <div class="search-result">
+            <div class="sr-date">${ev.startD.toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'})}</div>
+            <div class="sr-body">
+              <div class="sr-title">${escapeHtml(label)}</div>
+              ${parts?.phone ? `<div class="sr-phone">${escapeHtml(parts.phone)}</div>` : ''}
+              ${ev.comment ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>` : ''}
+            </div>
+            <div class="sr-status">${statusLabel}</div>
+          </div>
+        `
+      };
+    });
+  }
+
+  const allResults = [...remoteMatches, ...eventMatches].sort((a, b) => b.date - a.date);
+
+  if(allResults.length === 0){
+    resultsEl.innerHTML = `<div class="search-hint">Aucun résultat pour "${escapeHtml(query)}".</div>`;
+    return;
+  }
+
+  resultsEl.innerHTML = allResults.map(r => r.html).join('');
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function startApp(){
+  fetchEvents();
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchEvents, 5000); // resynchro toutes les 5s
+
+  if(config.remoteWorkerUrl && config.remoteAccessKey){
+    fetchRemoteTasks();
+    if(remoteTasksTimer) clearInterval(remoteTasksTimer);
+    remoteTasksTimer = setInterval(fetchRemoteTasks, 5000);
+
+    scanGmailForNewTasks();
+    if(gmailScanTimer) clearInterval(gmailScanTimer);
+    gmailScanTimer = setInterval(scanGmailForNewTasks, 60000); // vérifie les nouveaux mails toutes les 60s
+
+    if(remoteReminderTimer) clearInterval(remoteReminderTimer);
+    remoteReminderTimer = setInterval(() => {
+      const untouched = remoteTasks.some(t => t.status === '');
+      if(untouched) playChime();
+    }, 20 * 60 * 1000); // rappel toutes les 20 min s'il reste un dossier jamais commencé
+  }
+}
+
+async function init(){
+  await loadConfig();
+  if(!config){ renderSetup(); return; }
+  renderLoading();
+  const ok = await getAccessToken();
+  if(ok){ startApp(); }
+  // en cas d'échec, getAccessToken a déjà déclenché markConnectionLost(),
+  // qui affiche le bandeau et retentera automatiquement — aucune action requise
+}
+
+// Sécurité : nettoie toute fenêtre (commentaire/recherche) qui serait restée ouverte par erreur
+// et n'aurait pas été retirée — évite qu'un fond assombri reste bloqué à l'écran.
+window.addEventListener('pageshow', () => {
+  document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+});
+
+init();
 </script>
 </body>
 </html>
