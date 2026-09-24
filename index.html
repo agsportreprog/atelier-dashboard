@@ -1070,7 +1070,7 @@ async function openEmpreinteModal(id, nom){
     if(!res.ok || !data.url) throw new Error(data.error || 'Erreur');
 
     await patchPrivateProps(id, {
-      [PAYMENT_STATUS_KEY]: 'en_attente',
+      [PAYMENT_STATUS_KEY]: 'en_attente_manuel', // distinct de 'en_attente' (site public) : jamais supprimé par le nettoyage 15 min, le RDV est déjà réel et voulu
       [PAYMENT_CREATED_AT_KEY]: new Date().toISOString()
     });
 
@@ -1782,7 +1782,7 @@ function renderList(){
           </div>
         `;
         const courtesyHtml = ev.courtesyCar ? `<div class="courtesy-badge">🚗 Courtoisie : ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</div>` : '';
-        const paymentBadgeHtml = ev.paymentStatus === 'en_attente' ? `<div class="payment-pending-badge">⏳ Carte non encore enregistrée</div>`
+        const paymentBadgeHtml = (ev.paymentStatus === 'en_attente' || ev.paymentStatus === 'en_attente_manuel') ? `<div class="payment-pending-badge">⏳ Carte non encore enregistrée</div>`
           : ev.paymentStatus === 'confirme' ? `<div class="payment-confirmed-badge">✅ Empreinte enregistrée</div>` : '';
         // Bouton "Absent" volontairement à l'écart des boutons de statut (En cours/Pause/Fait) pour
         // qu'il ne soit jamais cliqué par erreur — seulement visible si une carte a bien été
@@ -1811,7 +1811,7 @@ function renderList(){
                 </div>
                 ${(config.stripePaymentsWorkerUrl && ev.paymentStatus !== 'confirme') ? `
                 <div class="comment-btn empreinte-btn" data-id="${ev.id}" data-nom="${encodeURIComponent(ev.raw || '')}">
-                  🔒 ${ev.paymentStatus === 'en_attente' ? "Relancer l'empreinte bancaire" : 'Demander une empreinte bancaire'}
+                  🔒 ${(ev.paymentStatus === 'en_attente' || ev.paymentStatus === 'en_attente_manuel') ? "Relancer l'empreinte bancaire" : 'Demander une empreinte bancaire'}
                 </div>` : ''}
               </div>
             </div>
