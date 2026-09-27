@@ -1061,12 +1061,31 @@ function setComment(id, comment){
   patchPrivateProps(id, { [COMMENT_KEY]: comment });
 }
 
+// Retire un marqueur " <emoji> ...contenu..." du titre, sans toucher à l'AUTRE marqueur (courtoisie
+// 🚗 ou tarif 💰) qui pourrait le suivre — nécessaire car les deux peuvent coexister dans le même
+// titre d'événement (ordre choisi : tarif puis courtoisie), et chacun doit pouvoir être modifié
+// indépendamment sans effacer l'autre.
+function withoutMarker(title, emoji){
+  const re = new RegExp(` ${emoji} [\\s\\S]*?(?= 🚗 | 💰 |$)`);
+  return (title || '').replace(re, '');
+}
+
 function setCourtesyCar(id, value){
   const ev = events.find(e => e.id === id);
-  const baseTitle = (ev ? ev.raw : '').replace(/ 🚗 .+$/, ''); // retire un ancien marqueur de courtoisie s'il existe
+  const baseTitle = withoutMarker(ev ? ev.raw : '', '🚗'); // retire un ancien marqueur de courtoisie s'il existe, garde le tarif
   const newTitle = value ? `${baseTitle} 🚗 ${COURTESY_CARS[value]}` : baseTitle;
   // colorId "6" = Tangerine (orange) dans Google Agenda ; null = remet la couleur par défaut
   patchPrivateProps(id, { [COURTESY_CAR_KEY]: value }, value ? '6' : null, newTitle);
+}
+
+// Reconstruit le titre avec le marqueur tarif (💰) inséré juste avant un marqueur de courtoisie
+// existant (🚗), ou en fin de titre s'il n'y en a pas — pour que l'ordre reste toujours cohérent.
+function buildTitleWithTarif(rawTitle, tarifFinal){
+  const sansTarif = withoutMarker(rawTitle, '💰');
+  if(!tarifFinal) return sansTarif;
+  const marker = ` 💰 ${tarifFinal}€`;
+  const idxCourtoisie = sansTarif.indexOf(' 🚗 ');
+  return idxCourtoisie === -1 ? (sansTarif + marker) : (sansTarif.slice(0, idxCourtoisie) + marker + sansTarif.slice(idxCourtoisie));
 }
 
 function openCourtesyModal(id, current){
@@ -1139,6 +1158,9 @@ function openTarifModal(id){
         <label>Tarif final retenu</label>
         <div id="tarifApercu" style="font-size:20px; font-weight:700; color:var(--accent);">—</div>
       </div>
+      <div class="field" style="margin-bottom:0;">
+        <label style="text-transform:none; letter-spacing:0; font-size:12px;">Ce tarif sera aussi ajouté au titre du rendez-vous, visible directement dans Google Agenda.</label>
+      </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="cancelTarif">Annuler</button>
         <button class="btn-save" id="saveTarif">Enregistrer</button>
@@ -1168,12 +1190,15 @@ function openTarifModal(id){
     const manuel = manuelEl.value;
     const final = calculerTarifFinal(base, reduction, manuel);
     overlay.remove();
+    // Le titre de l'événement est mis à jour en même temps que les propriétés privées, pour que le
+    // tarif soit visible directement dans Google Agenda (pas seulement dans le Planning).
+    const newTitle = buildTitleWithTarif(ev.raw, final);
     patchPrivateProps(id, {
       [TARIF_BASE_KEY]: base || '',
       [TARIF_REDUCTION_KEY]: reduction || '',
       [TARIF_MANUEL_KEY]: manuel || '',
       [TARIF_FINAL_KEY]: final ? String(final) : ''
-    });
+    }, undefined, newTitle);
   };
 }
 
@@ -1241,9 +1266,12 @@ async function openEmpreinteModal(id, nom){
   }
 }
 
-async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate}){
+async function createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, tarifBase, tarifReductionPct, tarifManuel, date, startTime, endTime, isMultiDay, endDate}){
   const modelPart = [nom, voiture].filter(Boolean).join(' ').trim();
   let summary = [modelPart, presta, numero].filter(Boolean).join(' | ');
+  const tarifFinal = calculerTarifFinal(tarifBase, tarifReductionPct, tarifManuel);
+  // Ordre du titre : tarif (💰) avant courtoisie (🚗), toujours cohérent avec buildTitleWithTarif/withoutMarker.
+  if(tarifFinal) summary += ` 💰 ${tarifFinal}€`;
   if(courtesy) summary += ` 🚗 ${COURTESY_CARS[courtesy]}`;
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
 
@@ -1276,8 +1304,15 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, c
     return false;
   }
   const created = await res.json();
-  if(commentaire || courtesy){
-    await patchPrivateProps(created.id, { [COMMENT_KEY]: commentaire || '', [COURTESY_CAR_KEY]: courtesy || '' }, courtesy ? '6' : undefined);
+  if(commentaire || courtesy || tarifFinal){
+    await patchPrivateProps(created.id, {
+      [COMMENT_KEY]: commentaire || '',
+      [COURTESY_CAR_KEY]: courtesy || '',
+      [TARIF_BASE_KEY]: tarifBase || '',
+      [TARIF_REDUCTION_KEY]: tarifReductionPct || '',
+      [TARIF_MANUEL_KEY]: tarifManuel || '',
+      [TARIF_FINAL_KEY]: tarifFinal ? String(tarifFinal) : ''
+    }, courtesy ? '6' : undefined);
   }
   return created.id;
 }
@@ -1365,6 +1400,25 @@ async function openNewEventModal(){
           <div class="field">
             <label>Prestation</label>
             <input id="newPresta" placeholder="ex : Reprog Stage 1">
+          </div>
+          <div class="field">
+            <label>Tarif (catalogue)</label>
+            <select id="newTarifSelect">
+              <option value="">— Choisir dans la liste —</option>
+              ${PRESTATIONS_TARIFS.map(p => `<option value="${p.prix}">${escapeHtml(p.label)} — ${p.prix}€</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Réduction (%)</label>
+            <input id="newTarifReduction" type="number" min="0" max="100" step="1" placeholder="0">
+          </div>
+          <div class="field">
+            <label>Tarif manuel (€) — remplace le calcul ci-dessus si rempli</label>
+            <input id="newTarifManuel" type="number" min="0" step="0.01" placeholder="Laisser vide pour utiliser le calcul">
+          </div>
+          <div class="field">
+            <label>Tarif final</label>
+            <div id="newTarifApercu" style="font-size:18px; font-weight:700; color:var(--accent);">—</div>
           </div>
           <div class="field">
             <label>Numéro de téléphone</label>
@@ -1574,6 +1628,18 @@ async function openNewEventModal(){
   document.getElementById('newMultiArrival').addEventListener('change', suggererHeureDepart);
   document.getElementById('newDate').addEventListener('change', suggererHeureDepart);
 
+  const newTarifSelectEl = document.getElementById('newTarifSelect');
+  const newTarifReductionEl = document.getElementById('newTarifReduction');
+  const newTarifManuelEl = document.getElementById('newTarifManuel');
+  const newTarifApercuEl = document.getElementById('newTarifApercu');
+  const rafraichirNewTarifApercu = () => {
+    const final = calculerTarifFinal(newTarifSelectEl.value, newTarifReductionEl.value, newTarifManuelEl.value);
+    newTarifApercuEl.textContent = final ? `${final.toFixed(2).replace(/\.00$/, '')} € TTC` : '—';
+  };
+  newTarifSelectEl.onchange = rafraichirNewTarifApercu;
+  newTarifReductionEl.oninput = rafraichirNewTarifApercu;
+  newTarifManuelEl.oninput = rafraichirNewTarifApercu;
+
   renderMiniCal();
   renderDayAgenda();
 
@@ -1630,6 +1696,9 @@ async function openNewEventModal(){
     const numero = document.getElementById('newNumero').value.trim();
     let commentaire = document.getElementById('newComment').value.trim();
     const courtesy = document.getElementById('newCourtesy').value;
+    const tarifBase = document.getElementById('newTarifSelect').value;
+    const tarifReductionPct = document.getElementById('newTarifReduction').value;
+    const tarifManuel = document.getElementById('newTarifManuel').value;
     const date = document.getElementById('newDate').value;
     const isMultiDay = document.getElementById('newMultiDay').checked;
     const startTime = document.getElementById('newStartTime').value;
@@ -1661,7 +1730,7 @@ async function openNewEventModal(){
     const saveBtn = document.getElementById('saveNewEvent');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Création...';
-    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, date, startTime, endTime, isMultiDay, endDate});
+    const ok = await createCalendarEvent({nom, voiture, presta, numero, commentaire, courtesy, tarifBase, tarifReductionPct, tarifManuel, date, startTime, endTime, isMultiDay, endDate});
     if(ok){
       overlay.remove();
       fetchEvents();
@@ -1825,7 +1894,7 @@ function openPerfModal(id, data){
 }
 
 function parseParts(raw){
-  const cleaned = (raw || '').replace(/ 🚗 .+$/, '');
+  const cleaned = withoutMarker(withoutMarker(raw || '', '🚗'), '💰');
   const parts = cleaned.split('|').map(s => s.trim()).filter(Boolean);
   if(parts.length >= 2){
     return { model: parts[0], presta: parts[1] || '', phone: parts[2] || '' };
