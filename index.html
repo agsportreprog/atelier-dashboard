@@ -1317,6 +1317,144 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, c
   return created.id;
 }
 
+// Récupère le suffixe de marqueurs (💰 tarif, puis 🚗 courtoisie) déjà présent à la fin du titre
+// d'un événement, tel quel, pour pouvoir le recoller après une modification des champs de base
+// (client/véhicule, prestation, numéro) sans jamais perdre le tarif ou le véhicule de courtoisie déjà
+// enregistrés — les deux ont leur propre bouton d'édition dédié, ce n'est pas ce formulaire qui les gère.
+function extractMarkersSuffix(raw){
+  const sansMarkers = withoutMarker(withoutMarker(raw || '', '🚗'), '💰');
+  return (raw || '').slice(sansMarkers.length);
+}
+
+// Modifie les champs de base d'un rendez-vous déjà créé (client/véhicule, prestation, numéro, date,
+// horaires ou garde plusieurs jours) — contrairement à createCalendarEvent (POST, nouvel événement),
+// ceci est un PATCH sur l'événement existant : son id, son commentaire, son tarif, sa voiture de
+// courtoisie et sa conversation liée restent inchangés.
+async function updateEventDetails(id, {summary, date, startTime, endTime, isMultiDay, endDate}){
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
+  const body = { summary };
+  if(isMultiDay){
+    const endExclusive = new Date(endDate + 'T00:00:00');
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    const endExclusiveStr = `${endExclusive.getFullYear()}-${String(endExclusive.getMonth()+1).padStart(2,'0')}-${String(endExclusive.getDate()).padStart(2,'0')}`;
+    body.start = { date: date };
+    body.end = { date: endExclusiveStr };
+  } else {
+    body.start = { dateTime: `${date}T${startTime}:00`, timeZone: 'Europe/Paris' };
+    body.end = { dateTime: `${date}T${endTime}:00`, timeZone: 'Europe/Paris' };
+  }
+  const res = await authFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    alert("Impossible de modifier le rendez-vous. Réessaie dans quelques instants.");
+    return false;
+  }
+  fetchEvents();
+  return true;
+}
+
+function openEditEventModal(id){
+  const ev = events.find(e => e.id === id);
+  if(!ev) return;
+  const parts = parseParts(ev.raw) || { model: ev.raw, presta: '', phone: '' };
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const pad2 = n => String(n).padStart(2, '0');
+  const dateStr = `${ev.startD.getFullYear()}-${pad2(ev.startD.getMonth()+1)}-${pad2(ev.startD.getDate())}`;
+  const endDateStr = `${ev.endD.getFullYear()}-${pad2(ev.endD.getMonth()+1)}-${pad2(ev.endD.getDate())}`;
+  const startTimeStr = ev.allDay ? '09:00' : `${pad2(ev.startD.getHours())}:${pad2(ev.startD.getMinutes())}`;
+  const endTimeStr = ev.allDay ? '10:00' : `${pad2(ev.endD.getHours())}:${pad2(ev.endD.getMinutes())}`;
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>✎ Modifier le rendez-vous</h3>
+      <div class="field required">
+        <label>Client / véhicule</label>
+        <input id="editModel" value="${escapeHtml(parts.model)}" placeholder="ex : Mr Dupont Peugeot 208 GTi">
+      </div>
+      <div class="field">
+        <label>Prestation</label>
+        <input id="editPresta" value="${escapeHtml(parts.presta)}" placeholder="ex : Reprog Stage 1">
+      </div>
+      <div class="field">
+        <label>Numéro de téléphone</label>
+        <input id="editNumero" value="${escapeHtml(parts.phone)}" placeholder="ex : 06 12 34 56 78">
+      </div>
+      <div class="field required">
+        <label>Date</label>
+        <input id="editDate" type="date" value="${dateStr}">
+      </div>
+      <label class="checkbox-row" style="margin-top:0; margin-bottom:14px;">
+        <input type="checkbox" id="editMultiDay" ${ev.allDay ? 'checked' : ''}> Véhicule gardé plusieurs jours (journée entière)
+      </label>
+      <div id="editSingleDayFields" style="${ev.allDay ? 'display:none;' : ''}">
+        <div class="field required">
+          <label>Heure de début</label>
+          <input id="editStartTime" type="time" value="${startTimeStr}">
+        </div>
+        <div class="field required">
+          <label>Heure de fin</label>
+          <input id="editEndTime" type="time" value="${endTimeStr}">
+        </div>
+      </div>
+      <div id="editMultiDayFields" style="${ev.allDay ? '' : 'display:none;'}">
+        <div class="field required">
+          <label>Jusqu'au (dernier jour inclus)</label>
+          <input id="editEndDate" type="date" value="${endDateStr}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelEdit">Annuler</button>
+        <button class="btn-save" id="saveEdit">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelEdit').onclick = () => overlay.remove();
+  document.getElementById('editMultiDay').addEventListener('change', (e) => {
+    document.getElementById('editSingleDayFields').style.display = e.target.checked ? 'none' : '';
+    document.getElementById('editMultiDayFields').style.display = e.target.checked ? '' : 'none';
+  });
+
+  document.getElementById('saveEdit').onclick = async () => {
+    const model = document.getElementById('editModel').value.trim();
+    const presta = document.getElementById('editPresta').value.trim();
+    const numero = document.getElementById('editNumero').value.trim();
+    const date = document.getElementById('editDate').value;
+    const isMultiDay = document.getElementById('editMultiDay').checked;
+    const startTime = document.getElementById('editStartTime').value;
+    const endTime = document.getElementById('editEndTime').value;
+    const endDate = document.getElementById('editEndDate').value;
+    if(!model || !date){
+      alert('Renseigne au moins le client/véhicule et la date.');
+      return;
+    }
+    if(isMultiDay && !endDate){
+      alert('Renseigne le dernier jour de garde du véhicule.');
+      return;
+    }
+    if(!isMultiDay && (!startTime || !endTime)){
+      alert('Renseigne les horaires de début et de fin.');
+      return;
+    }
+    const suffix = extractMarkersSuffix(ev.raw); // conserve le tarif et/ou le véhicule de courtoisie déjà enregistrés
+    const summary = [model, presta, numero].filter(Boolean).join(' | ') + suffix;
+    const saveBtn = document.getElementById('saveEdit');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Enregistrement...';
+    const ok = await updateEventDetails(id, { summary, date, startTime, endTime, isMultiDay, endDate });
+    if(ok){
+      overlay.remove();
+    } else {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Enregistrer';
+    }
+  };
+}
+
 // Estimation du prix (TTC) d'une prestation à partir de mots-clés dans le titre — utilisée par le
 // bouton "Absent" pour calculer le montant du prélèvement de 10% en cas de rendez-vous non honoré.
 const REVENUE_KEYWORDS = [
@@ -2004,6 +2142,9 @@ function renderList(){
                 ${body}
                 ${paymentBadgeHtml}
                 ${tarifBadgeHtml}
+                <div class="comment-btn edit-event-btn" data-id="${ev.id}">
+                  ✎ Modifier le rendez-vous
+                </div>
                 ${commentHtml}
                 <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
                   ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
@@ -2191,6 +2332,9 @@ function renderList(){
   });
   document.querySelectorAll('.tarif-edit-btn').forEach(el => {
     el.onclick = () => openTarifModal(el.dataset.id);
+  });
+  document.querySelectorAll('.edit-event-btn').forEach(el => {
+    el.onclick = () => openEditEventModal(el.dataset.id);
   });
   document.querySelectorAll('.empreinte-btn').forEach(el => {
     el.onclick = () => openEmpreinteModal(el.dataset.id, decodeURIComponent(el.dataset.nom));
