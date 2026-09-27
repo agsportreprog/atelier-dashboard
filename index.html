@@ -226,6 +226,7 @@
   .conv-row:hover{border-color:var(--accent);}
   .conv-row-date{font-size:11px; color:var(--text-dim); margin-bottom:3px; font-family:var(--mono);}
   .conv-row-apercu{font-size:13px; color:var(--text);}
+  .conv-count{font-size:11px; color:var(--text-dim); font-weight:400;}
   .conv-back{font-size:12px; color:var(--accent); cursor:pointer; font-weight:400; text-transform:none; letter-spacing:0;}
   .modal-newevent{max-width:none; width:98vw; max-height:96vh; overflow-y:auto;}
   .modal-newevent .newevent-left{flex:0 0 360px;}
@@ -314,6 +315,10 @@
     display:inline-block; margin:6px 0; padding:3px 8px; border-radius:6px;
     background:#1a3a26; color:#3ecf8e; font-size:12px; font-weight:600;
   }
+  .tarif-badge{
+    display:inline-block; margin:6px 0; padding:3px 8px; border-radius:6px;
+    background:#1a2a3a; color:#5aa8e0; font-size:12px; font-weight:700;
+  }
   .noshow-row{ margin-top:10px; padding-top:8px; border-top:1px dashed var(--border, #333); display:flex; justify-content:flex-end; }
   .noshow-btn{
     font-size:11px; padding:4px 9px; border-radius:6px; border:1px solid #8a2020;
@@ -346,7 +351,36 @@ const PAYMENT_CREATED_AT_KEY = 'atelier_payment_created_at'; // ISO, pour le net
 const STRIPE_CUSTOMER_KEY = 'atelier_stripe_customer';
 const STRIPE_PM_KEY = 'atelier_stripe_pm';
 const NOSHOW_CHARGED_KEY = 'atelier_noshow_charged';        // 'true' | absent
+const TARIF_BASE_KEY = 'atelier_tarif_base';                // prix catalogue choisi dans la liste, avant réduction
+const TARIF_REDUCTION_KEY = 'atelier_tarif_reduction_pct';  // réduction en % appliquée au tarif de base
+const TARIF_MANUEL_KEY = 'atelier_tarif_manuel';            // tarif saisi à la main, prioritaire sur base+réduction s'il est présent
+const TARIF_FINAL_KEY = 'atelier_tarif_final';               // tarif réellement affiché/retenu — manuel si présent, sinon base réduit, sinon base
 const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c3: 'C3 (diesel)' };
+
+// Catalogue des prestations pour la liste déroulante de la case "Tarif" — mêmes prix que ceux
+// utilisés par l'assistant IA du site public (public-booking-api), à tenir synchronisés si un tarif
+// change. Les combos (Stage 1 + options, Flexfuel + Stage 1) ne sont pas listés un par un ici :
+// choisis la prestation la plus proche puis ajuste avec la réduction % ou le tarif manuel.
+const PRESTATIONS_TARIFS = [
+  { label: 'Mise à jour EGR', prix: 180 },
+  { label: 'Mise à jour FAP', prix: 180 },
+  { label: 'Mise à jour AdBlue', prix: 350 },
+  { label: 'Reprog puissance (jusqu\'à 2014)', prix: 450 },
+  { label: 'Reprog puissance (2015-2019)', prix: 500 },
+  { label: 'Reprog puissance (2020-2022)', prix: 550 },
+  { label: 'Reprog puissance (2022-auj.)', prix: 600 },
+  { label: 'Banc de puissance seul', prix: 120 },
+  { label: 'Banc de puissance (option + reprog)', prix: 80 },
+  { label: 'Flexfuel 3/4 cylindres', prix: 690 },
+  { label: 'Flexfuel 5 cylindres', prix: 790 },
+  { label: 'Flexfuel 6 cylindres', prix: 990 },
+  { label: 'Flexfuel 8/10 cylindres', prix: 1190 },
+  { label: 'Flexfuel 3/4 cyl + Stage 1', prix: 890 },
+  { label: 'Flexfuel 5 cyl + Stage 1', prix: 990 },
+  { label: 'Flexfuel 6 cyl + Stage 1', prix: 1190 },
+  { label: 'Flexfuel 8/10 cyl + Stage 1', prix: 1390 },
+  { label: 'Diagnostic', prix: 49 }
+];
 
 // Renvoie l'ensemble des véhicules de courtoisie déjà prêtés sur au moins un jour de la plage
 // [dateFrom, dateTo] (AAAA-MM-JJ) — sert à ne pas proposer une voiture déjà partie ce jour-là.
@@ -621,7 +655,11 @@ function mapEvent(ev){
     paymentStatus: priv[PAYMENT_STATUS_KEY] || '',
     stripeCustomerId: priv[STRIPE_CUSTOMER_KEY] || '',
     stripePaymentMethodId: priv[STRIPE_PM_KEY] || '',
-    noShowCharged: priv[NOSHOW_CHARGED_KEY] === 'true'
+    noShowCharged: priv[NOSHOW_CHARGED_KEY] === 'true',
+    tarifBase: priv[TARIF_BASE_KEY] || '',
+    tarifReductionPct: priv[TARIF_REDUCTION_KEY] || '',
+    tarifManuel: priv[TARIF_MANUEL_KEY] || '',
+    tarifFinal: priv[TARIF_FINAL_KEY] || ''
   };
 }
 
@@ -1059,6 +1097,83 @@ function openCourtesyModal(id, current){
     const val = document.getElementById('courtesySelect').value;
     overlay.remove();
     setCourtesyCar(id, val);
+  };
+}
+
+// Calcule le tarif final à partir des trois valeurs stockées : le manuel est toujours prioritaire
+// s'il est renseigné, sinon on applique la réduction % au tarif de base choisi dans la liste.
+function calculerTarifFinal(base, reductionPct, manuel){
+  if(manuel !== '' && manuel !== null && manuel !== undefined && !isNaN(manuel)) return Math.round(Number(manuel) * 100) / 100;
+  const b = Number(base) || 0;
+  const r = Number(reductionPct) || 0;
+  return Math.round(b * (1 - r / 100) * 100) / 100;
+}
+
+function openTarifModal(id){
+  const ev = events.find(e => e.id === id);
+  if(!ev) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const optionsHtml = PRESTATIONS_TARIFS.map(p =>
+    `<option value="${p.prix}" ${String(p.prix) === String(ev.tarifBase) ? 'selected' : ''}>${escapeHtml(p.label)} — ${p.prix}€</option>`
+  ).join('');
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>💰 Tarif de la prestation</h3>
+      <div class="field">
+        <label>Prestation (liste catalogue)</label>
+        <select id="tarifSelect">
+          <option value="">— Choisir dans la liste —</option>
+          ${optionsHtml}
+        </select>
+      </div>
+      <div class="field">
+        <label>Réduction (%)</label>
+        <input id="tarifReduction" type="number" min="0" max="100" step="1" value="${escapeHtml(ev.tarifReductionPct)}" placeholder="0">
+      </div>
+      <div class="field">
+        <label>Tarif manuel (€) — remplace le calcul ci-dessus si rempli</label>
+        <input id="tarifManuel" type="number" min="0" step="0.01" value="${escapeHtml(ev.tarifManuel)}" placeholder="Laisser vide pour utiliser le calcul">
+      </div>
+      <div class="field">
+        <label>Tarif final retenu</label>
+        <div id="tarifApercu" style="font-size:20px; font-weight:700; color:var(--accent);">—</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelTarif">Annuler</button>
+        <button class="btn-save" id="saveTarif">Enregistrer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelTarif').onclick = () => overlay.remove();
+
+  const selectEl = document.getElementById('tarifSelect');
+  const reductionEl = document.getElementById('tarifReduction');
+  const manuelEl = document.getElementById('tarifManuel');
+  const apercuEl = document.getElementById('tarifApercu');
+  const rafraichirApercu = () => {
+    const final = calculerTarifFinal(selectEl.value, reductionEl.value, manuelEl.value);
+    apercuEl.textContent = final ? `${final.toFixed(2).replace(/\.00$/, '')} € TTC` : '—';
+  };
+  selectEl.onchange = rafraichirApercu;
+  reductionEl.oninput = rafraichirApercu;
+  manuelEl.oninput = rafraichirApercu;
+  rafraichirApercu();
+
+  document.getElementById('saveTarif').onclick = () => {
+    const base = selectEl.value;
+    const reduction = reductionEl.value;
+    const manuel = manuelEl.value;
+    const final = calculerTarifFinal(base, reduction, manuel);
+    overlay.remove();
+    patchPrivateProps(id, {
+      [TARIF_BASE_KEY]: base || '',
+      [TARIF_REDUCTION_KEY]: reduction || '',
+      [TARIF_MANUEL_KEY]: manuel || '',
+      [TARIF_FINAL_KEY]: final ? String(final) : ''
+    });
   };
 }
 
@@ -1802,6 +1917,7 @@ function renderList(){
         const courtesyHtml = ev.courtesyCar ? `<div class="courtesy-badge">🚗 Courtoisie : ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</div>` : '';
         const paymentBadgeHtml = (ev.paymentStatus === 'en_attente' || ev.paymentStatus === 'en_attente_manuel') ? `<div class="payment-pending-badge">⏳ Carte non encore enregistrée</div>`
           : ev.paymentStatus === 'confirme' ? `<div class="payment-confirmed-badge">✅ Empreinte enregistrée</div>` : '';
+        const tarifBadgeHtml = ev.tarifFinal ? `<div class="tarif-badge">💰 ${escapeHtml(ev.tarifFinal)} € TTC</div>` : '';
         // Bouton "Absent" volontairement à l'écart des boutons de statut (En cours/Pause/Fait) pour
         // qu'il ne soit jamais cliqué par erreur — seulement visible si une carte a bien été
         // enregistrée pour ce RDV (donc un prélèvement est possible).
@@ -1818,6 +1934,7 @@ function renderList(){
               <div class="body">
                 ${body}
                 ${paymentBadgeHtml}
+                ${tarifBadgeHtml}
                 ${commentHtml}
                 <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
                   ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
@@ -1826,6 +1943,9 @@ function renderList(){
                 ${courtesyHtml}
                 <div class="comment-btn courtesy-edit-btn" data-id="${ev.id}" data-current="${encodeURIComponent(ev.courtesyCar || '')}">
                   ${ev.courtesyCar ? '🚗 Modifier le véhicule de courtoisie' : '🚗 Prêter un véhicule de courtoisie'}
+                </div>
+                <div class="comment-btn tarif-edit-btn" data-id="${ev.id}">
+                  ${ev.tarifFinal ? '💰 Modifier le tarif' : '💰 Renseigner le tarif'}
                 </div>
                 ${(config.stripePaymentsWorkerUrl && ev.paymentStatus !== 'confirme') ? `
                 <div class="comment-btn empreinte-btn" data-id="${ev.id}" data-nom="${encodeURIComponent(ev.raw || '')}">
@@ -2000,6 +2120,9 @@ function renderList(){
   document.querySelectorAll('.courtesy-edit-btn').forEach(el => {
     el.onclick = () => openCourtesyModal(el.dataset.id, decodeURIComponent(el.dataset.current));
   });
+  document.querySelectorAll('.tarif-edit-btn').forEach(el => {
+    el.onclick = () => openTarifModal(el.dataset.id);
+  });
   document.querySelectorAll('.empreinte-btn').forEach(el => {
     el.onclick = () => openEmpreinteModal(el.dataset.id, decodeURIComponent(el.dataset.nom));
   });
@@ -2141,29 +2264,67 @@ async function openConversationsModal(){
 
   const bodyEl = overlay.querySelector('.transcript-body');
   const titleEl = overlay.querySelector('h3');
-  let listeCache = null;
+  let dossiersCache = null;
 
-  function renderListe(){
+  // Regroupe les conversations par prénom client détecté (nom renvoyé par le Worker) — celles sans
+  // prénom identifié tombent dans un dossier "Inconnu" commun. Ça absorbe au passage les échanges
+  // qui se seraient fragmentés en plusieurs entrées côté widget (même client, même dossier).
+  function regrouperParNom(liste){
+    const groupes = new Map();
+    liste.forEach(c => {
+      const cle = c.nom || 'Inconnu';
+      if(!groupes.has(cle)) groupes.set(cle, []);
+      groupes.get(cle).push(c);
+    });
+    return [...groupes.entries()].map(([nom, convs]) => ({
+      nom,
+      convs: convs.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')),
+      dernierUpdatedAt: convs.reduce((max, c) => (c.updatedAt || '') > max ? c.updatedAt : max, '')
+    })).sort((a, b) => (b.dernierUpdatedAt || '').localeCompare(a.dernierUpdatedAt || ''));
+  }
+
+  function renderDossiers(){
     titleEl.textContent = '💬 Conversations sans rendez-vous';
-    if(!listeCache || listeCache.length === 0){
+    if(!dossiersCache || dossiersCache.length === 0){
       bodyEl.innerHTML = `<div class="search-hint">Aucune conversation en attente pour l'instant.</div>`;
       return;
     }
-    bodyEl.innerHTML = listeCache.map(c => `
+    bodyEl.innerHTML = dossiersCache.map((d, i) => `
+      <div class="conv-row" data-idx="${i}">
+        <div class="conv-row-date">${formatConvDate(d.dernierUpdatedAt)}</div>
+        <div class="conv-row-apercu">📁 ${escapeHtml(d.nom)} ${d.convs.length > 1 ? `<span class="conv-count">(${d.convs.length})</span>` : ''}</div>
+      </div>
+    `).join('');
+    bodyEl.querySelectorAll('.conv-row').forEach(el => {
+      el.onclick = () => {
+        const d = dossiersCache[Number(el.dataset.idx)];
+        if(d.convs.length === 1) afficherDetail(d.convs[0].id, d);
+        else renderConvsDuDossier(d);
+      };
+    });
+  }
+
+  function renderConvsDuDossier(dossier){
+    titleEl.innerHTML = `💬 ${escapeHtml(dossier.nom)} <span class="conv-back" id="backToFolders">← retour aux conversations</span>`;
+    document.getElementById('backToFolders').onclick = renderDossiers;
+    bodyEl.innerHTML = dossier.convs.map(c => `
       <div class="conv-row" data-id="${encodeURIComponent(c.id)}">
         <div class="conv-row-date">${formatConvDate(c.updatedAt)}</div>
         <div class="conv-row-apercu">${escapeHtml(c.apercu || '')}</div>
       </div>
     `).join('');
     bodyEl.querySelectorAll('.conv-row').forEach(el => {
-      el.onclick = () => afficherDetail(decodeURIComponent(el.dataset.id));
+      el.onclick = () => afficherDetail(decodeURIComponent(el.dataset.id), dossier);
     });
   }
 
-  async function afficherDetail(id){
+  async function afficherDetail(id, dossier){
     bodyEl.innerHTML = `<div class="search-hint">Chargement...</div>`;
-    titleEl.innerHTML = `💬 Conversation <span class="conv-back" id="backToConvList">← retour à la liste</span>`;
-    document.getElementById('backToConvList').onclick = renderListe;
+    titleEl.innerHTML = `💬 Conversation <span class="conv-back" id="backToConvList">← retour</span>`;
+    document.getElementById('backToConvList').onclick = () => {
+      if(dossier && dossier.convs.length > 1) renderConvsDuDossier(dossier);
+      else renderDossiers();
+    };
     try{
       const res = await fetchWithTimeout(config.publicBookingWorkerUrl, {
         method: 'POST',
@@ -2186,8 +2347,8 @@ async function openConversationsModal(){
     }, 20000);
     const data = await res.json();
     if(!res.ok || data.error) throw new Error(data.error || 'Erreur');
-    listeCache = data.conversations || [];
-    renderListe();
+    dossiersCache = regrouperParNom(data.conversations || []);
+    renderDossiers();
   }catch(e){
     bodyEl.innerHTML = `<div class="search-hint" style="color:#e05a5a;">Impossible de charger les conversations. Vérifie la configuration dans ⚙.</div>`;
   }
