@@ -1222,6 +1222,11 @@ function openTarifModal(id){
 async function openEmpreinteModal(id, nom){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  // Numéro du client déduit du titre de l'événement (même logique que parseParts ailleurs) — sert
+  // uniquement à proposer le bouton "Envoyer par SMS", pré-rempli mais jamais imposé.
+  const evForPhone = events.find(e => e.id === id);
+  const partsForPhone = evForPhone ? parseParts(evForPhone.raw) : null;
+  const clientPhone = partsForPhone ? (partsForPhone.phone || '') : '';
   overlay.innerHTML = `
     <div class="modal">
       <h3>Empreinte bancaire</h3>
@@ -1256,8 +1261,18 @@ async function openEmpreinteModal(id, nom){
         <label>Lien à envoyer au client (SMS, mail, WhatsApp...) ou à ouvrir directement</label>
         <input id="empreinteLink" type="text" readonly value="${data.url}" onclick="this.select()">
       </div>
+      ${clientPhone ? `
+      <div class="field">
+        <label>Numéro détecté</label>
+        <input id="empreinteNumero" type="text" value="${escapeHtml(clientPhone)}">
+      </div>` : `
+      <div class="field">
+        <label>Numéro du client (aucun détecté automatiquement)</label>
+        <input id="empreinteNumero" type="text" placeholder="ex : 06 12 34 56 78">
+      </div>`}
       <div class="modal-actions">
-        <button class="btn-cancel" id="copyEmpreinte">📋 Copier le lien</button>
+        <button class="btn-cancel" id="copyEmpreinte">📋 Copier</button>
+        <button class="btn-cancel" id="smsEmpreinte">📱 Envoyer par SMS</button>
         <button class="btn-save" id="openEmpreinte">Ouvrir ici</button>
       </div>
     `;
@@ -1265,6 +1280,30 @@ async function openEmpreinteModal(id, nom){
       navigator.clipboard.writeText(data.url).then(() => {
         document.getElementById('copyEmpreinte').textContent = '✓ Copié';
       });
+    };
+    document.getElementById('smsEmpreinte').onclick = async () => {
+      const btn = document.getElementById('smsEmpreinte');
+      const numero = document.getElementById('empreinteNumero').value.trim();
+      if(!numero){
+        alert('Renseigne le numéro de téléphone du client.');
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Envoi...';
+      try{
+        const smsRes = await fetchWithTimeout(config.stripePaymentsWorkerUrl, {
+          method: 'POST',
+          headers: { 'X-Auth-Key': config.stripePaymentsAccessKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_link_sms', numero, url: data.url })
+        }, 20000);
+        const smsData = await smsRes.json();
+        if(!smsRes.ok || !smsData.success) throw new Error(smsData.error || 'Échec de l\'envoi');
+        btn.textContent = '✓ SMS envoyé';
+      }catch(e){
+        alert("Échec de l'envoi du SMS : " + e.message);
+        btn.disabled = false;
+        btn.textContent = '📱 Envoyer par SMS';
+      }
     };
     document.getElementById('openEmpreinte').onclick = () => {
       window.open(data.url, '_blank');
