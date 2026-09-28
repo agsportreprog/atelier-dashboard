@@ -132,6 +132,12 @@
   }
   .card .time .arrow{display:block; font-size:10px; color:var(--text-dim); font-weight:400; margin:2px 0;}
   .card .time span{font-size:10px; font-weight:400; color:var(--text-dim); margin-top:2px;}
+  .card .time .time-tarif{
+    display:flex; align-items:center; gap:3px; margin-top:6px; font-size:11px; font-weight:700;
+    color:#5aa8e0; cursor:pointer; font-family:inherit;
+  }
+  .card .time .time-tarif:hover{ color:var(--accent); }
+  .card .time .time-tarif .pencil{ font-size:10px; opacity:.75; }
   .card .body{flex:1; padding:14px 18px; display:flex; flex-direction:column; gap:4px; min-width:0;}
   .card .model{font-size:17px; font-weight:700;}
   .card .presta{font-size:13px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:.04em;}
@@ -144,6 +150,17 @@
   .comment-btn{
     font-size:12px; color:var(--accent); margin-top:4px; cursor:pointer; width:fit-content;
   }
+  /* Rangée compacte pour tous les boutons d'action d'une carte de rendez-vous (modifier, commentaire,
+     performances, courtoisie, tarif, empreinte, conversation) — passe à la ligne au besoin, pour que
+     la carte reste courte même avec beaucoup de boutons disponibles. */
+  .action-links{
+    display:flex; flex-wrap:wrap; gap:6px 8px; margin-top:8px;
+  }
+  .action-links .comment-btn{
+    margin-top:0; padding:4px 10px; border-radius:14px; border:1px solid var(--line-solid);
+    background:var(--panel-2); white-space:nowrap;
+  }
+  .action-links .comment-btn:hover{ border-color:var(--accent); }
   .tool-tag{
     display:inline-block; background:var(--panel-2); border:1px solid var(--line-solid);
     padding:1px 7px; border-radius:5px; font-size:10px; margin-left:6px; color:var(--text-dim);
@@ -2112,19 +2129,30 @@ function renderList(){
           before: ev.perfBefore, after: ev.perfAfter, before060: ev.perf060Before, after060: ev.perf060After,
           hpBefore: ev.hpBefore, hpAfter: ev.hpAfter, torqueBefore: ev.torqueBefore, torqueAfter: ev.torqueAfter
         }));
-        const perfHtml = `
-          ${hasPerf ? `<div class="perf-summary">⏱ ${perfLines.join(' · ')}</div>` : ''}
-          <div class="perf-actions">
-            <div class="comment-btn perf-edit-btn" data-id="${ev.id}" data-perf="${perfData}">
-              ${hasPerf ? '⏱ Modifier les performances' : '⏱ Ajouter les performances'}
-            </div>
-            ${hasPerf ? `<div class="comment-btn perf-print-btn" data-id="${ev.id}">🖨️ Imprimer PDF</div>` : ''}
-          </div>
-        `;
+        const perfSummaryHtml = hasPerf ? `<div class="perf-summary">⏱ ${perfLines.join(' · ')}</div>` : '';
+        // Tous les boutons d'action de la carte (modifier, commentaire, performances, courtoisie,
+        // tarif, empreinte, conversation) sont regroupés dans une seule rangée qui passe à la ligne
+        // au besoin (.action-links), plutôt qu'un par un en hauteur — la carte reste beaucoup plus
+        // compacte, surtout maintenant qu'il y a plusieurs boutons possibles par rendez-vous.
+        const actionLinksHtml = [
+          `<div class="comment-btn edit-event-btn" data-id="${ev.id}">✎ Modifier le RDV</div>`,
+          `<div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">${ev.comment ? '✎ Commentaire' : '+ Commentaire'}</div>`,
+          `<div class="comment-btn perf-edit-btn" data-id="${ev.id}" data-perf="${perfData}">${hasPerf ? '⏱ Performances' : '⏱ + Performances'}</div>`,
+          hasPerf ? `<div class="comment-btn perf-print-btn" data-id="${ev.id}">🖨️ PDF</div>` : '',
+          `<div class="comment-btn courtesy-edit-btn" data-id="${ev.id}" data-current="${encodeURIComponent(ev.courtesyCar || '')}">${ev.courtesyCar ? '🚗 Courtoisie' : '🚗 + Courtoisie'}</div>`,
+          ev.tarifFinal ? '' : `<div class="comment-btn tarif-edit-btn" data-id="${ev.id}">💰 + Tarif</div>`,
+          (config.stripePaymentsWorkerUrl && ev.paymentStatus !== 'confirme')
+            ? `<div class="comment-btn empreinte-btn" data-id="${ev.id}" data-nom="${encodeURIComponent(ev.raw || '')}">🔒 ${(ev.paymentStatus === 'en_attente' || ev.paymentStatus === 'en_attente_manuel') ? "Relancer l'empreinte" : 'Empreinte'}</div>`
+            : '',
+          ev.conversation ? `<div class="comment-btn transcript-btn" data-id="${ev.id}">💬 Conversation</div>` : ''
+        ].filter(Boolean).join('');
         const courtesyHtml = ev.courtesyCar ? `<div class="courtesy-badge">🚗 Courtoisie : ${escapeHtml(COURTESY_CARS[ev.courtesyCar] || ev.courtesyCar)}</div>` : '';
         const paymentBadgeHtml = (ev.paymentStatus === 'en_attente' || ev.paymentStatus === 'en_attente_manuel') ? `<div class="payment-pending-badge">⏳ Carte non encore enregistrée</div>`
           : ev.paymentStatus === 'confirme' ? `<div class="payment-confirmed-badge">✅ Empreinte enregistrée</div>` : '';
-        const tarifBadgeHtml = ev.tarifFinal ? `<div class="tarif-badge">💰 ${escapeHtml(ev.tarifFinal)} € TTC</div>` : '';
+        // Affiché directement dans la colonne horaire (coin gauche de la carte), avec juste un petit
+        // crayon plutôt qu'un texte long — plus besoin d'aller chercher le tarif dans le corps de la
+        // carte pour le voir ou le modifier. Cliquable comme .tarif-edit-btn ailleurs.
+        const tarifCornerHtml = ev.tarifFinal ? `<span class="time-tarif tarif-edit-btn" data-id="${ev.id}">💰 ${escapeHtml(ev.tarifFinal)}€ <span class="pencil">✎</span></span>` : '';
         // Bouton "Absent" volontairement à l'écart des boutons de statut (En cours/Pause/Fait) pour
         // qu'il ne soit jamais cliqué par erreur — seulement visible si une carte a bien été
         // enregistrée pour ce RDV (donc un prélèvement est possible).
@@ -2137,34 +2165,14 @@ function renderList(){
         return `
           <div class="card ${ev.done ? 'done' : ''} ${ev.paused ? 'paused' : ''} ${ev.inProgress ? 'inprogress' : ''} ${ev.courtesyCar ? 'has-courtesy' : ''}">
             <div class="card-top">
-              <div class="time">${fmtRange(ev)}<span>${statusLabel}</span></div>
+              <div class="time">${fmtRange(ev)}<span>${statusLabel}</span>${tarifCornerHtml}</div>
               <div class="body">
                 ${body}
                 ${paymentBadgeHtml}
-                ${tarifBadgeHtml}
-                <div class="comment-btn edit-event-btn" data-id="${ev.id}">
-                  ✎ Modifier le rendez-vous
-                </div>
                 ${commentHtml}
-                <div class="comment-btn" data-id="${ev.id}" data-comment="${encodeURIComponent(ev.comment)}">
-                  ${ev.comment ? '✎ Modifier le commentaire' : '+ Ajouter un commentaire'}
-                </div>
-                ${perfHtml}
+                ${perfSummaryHtml}
                 ${courtesyHtml}
-                <div class="comment-btn courtesy-edit-btn" data-id="${ev.id}" data-current="${encodeURIComponent(ev.courtesyCar || '')}">
-                  ${ev.courtesyCar ? '🚗 Modifier le véhicule de courtoisie' : '🚗 Prêter un véhicule de courtoisie'}
-                </div>
-                <div class="comment-btn tarif-edit-btn" data-id="${ev.id}">
-                  ${ev.tarifFinal ? '💰 Modifier le tarif' : '💰 Renseigner le tarif'}
-                </div>
-                ${(config.stripePaymentsWorkerUrl && ev.paymentStatus !== 'confirme') ? `
-                <div class="comment-btn empreinte-btn" data-id="${ev.id}" data-nom="${encodeURIComponent(ev.raw || '')}">
-                  🔒 ${(ev.paymentStatus === 'en_attente' || ev.paymentStatus === 'en_attente_manuel') ? "Relancer l'empreinte bancaire" : 'Demander une empreinte bancaire'}
-                </div>` : ''}
-                ${ev.conversation ? `
-                <div class="comment-btn transcript-btn" data-id="${ev.id}">
-                  💬 Voir la conversation avec l'assistant
-                </div>` : ''}
+                <div class="action-links">${actionLinksHtml}</div>
               </div>
             </div>
             <div class="card-actions">
