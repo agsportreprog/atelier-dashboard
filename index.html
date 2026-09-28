@@ -1270,9 +1270,14 @@ async function openEmpreinteModal(id, nom){
         <label>Numéro du client (aucun détecté automatiquement)</label>
         <input id="empreinteNumero" type="text" placeholder="ex : 06 12 34 56 78">
       </div>`}
+      <div class="field">
+        <label>Email du client (aucun détecté automatiquement)</label>
+        <input id="empreinteEmail" type="email" placeholder="ex : client@exemple.fr">
+      </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="copyEmpreinte">📋 Copier</button>
         <button class="btn-cancel" id="smsEmpreinte">📱 Envoyer par SMS</button>
+        <button class="btn-cancel" id="emailEmpreinte">📧 Envoyer par email</button>
         <button class="btn-save" id="openEmpreinte">Ouvrir ici</button>
       </div>
     `;
@@ -1303,6 +1308,30 @@ async function openEmpreinteModal(id, nom){
         alert("Échec de l'envoi du SMS : " + e.message);
         btn.disabled = false;
         btn.textContent = '📱 Envoyer par SMS';
+      }
+    };
+    document.getElementById('emailEmpreinte').onclick = async () => {
+      const btn = document.getElementById('emailEmpreinte');
+      const emailAdresse = document.getElementById('empreinteEmail').value.trim();
+      if(!emailAdresse){
+        alert("Renseigne l'adresse email du client.");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Envoi...';
+      try{
+        const emailRes = await fetchWithTimeout(config.stripePaymentsWorkerUrl, {
+          method: 'POST',
+          headers: { 'X-Auth-Key': config.stripePaymentsAccessKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_link_email', email: emailAdresse, url: data.url })
+        }, 20000);
+        const emailData = await emailRes.json();
+        if(!emailRes.ok || !emailData.success) throw new Error(emailData.error || 'Échec de l\'envoi');
+        btn.textContent = '✓ Email envoyé';
+      }catch(e){
+        alert("Échec de l'envoi de l'email : " + e.message);
+        btn.disabled = false;
+        btn.textContent = '📧 Envoyer par email';
       }
     };
     document.getElementById('openEmpreinte').onclick = () => {
