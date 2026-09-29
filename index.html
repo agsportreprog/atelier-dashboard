@@ -70,6 +70,11 @@
     border:1px solid var(--line-solid); color:var(--text-dim);
   }
   .pill b{color:var(--text); font-size:14px;}
+  .pill-warning{
+    cursor:pointer; border-color:#e0785a; color:#e0a08a; background:#e0785a1a;
+  }
+  .pill-warning b{color:#e0785a;}
+  .pill-warning:hover{background:#e0785a33;}
 
   .list{padding:16px 28px 40px; display:flex; flex-direction:column; gap:10px;}
 
@@ -209,6 +214,14 @@
     width:100%; padding:11px 13px; border-radius:9px; border:1px solid var(--line-solid);
     background:var(--panel-2); color:var(--text); font-family:inherit; font-size:14px;
   }
+  .sans-empreinte-list{display:flex; flex-direction:column; gap:10px; max-height:52vh; overflow-y:auto; margin-bottom:14px;}
+  .sans-empreinte-row{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:10px 12px; border-radius:10px; background:var(--panel-2); border:1px solid var(--line-solid);
+  }
+  .sans-empreinte-row .sr-model{font-size:14px; font-weight:700;}
+  .sans-empreinte-row .sr-meta{font-size:12px; color:var(--text-dim); margin-top:2px;}
+  .sans-empreinte-row .comment-btn{margin-top:0; white-space:nowrap;}
   .perf-summary{font-size:12px; color:var(--text-dim); margin-top:6px; font-family:var(--mono);}
   .mini-cal{background:var(--panel-2); border:1px solid var(--line-solid); border-radius:10px; padding:12px; margin-top:4px; max-width:480px;}
   .mc-loading{display:block; text-transform:none; letter-spacing:0; font-size:12px; color:var(--text-dim); font-weight:400; margin-bottom:10px;}
@@ -654,6 +667,7 @@ function mapEvent(ev){
     start: startRaw,
     end: endRaw,
     startD, endD, allDay,
+    created: ev.created || '', // horodatage de création du RDV par Google Calendar (pas notre timestamp interne), sert à repérer les RDV sans empreinte au bout d'1h
     raw: ev.summary || '',
     done: priv[STATUS_KEY] === 'done',
     paused: priv[STATUS_KEY] === 'paused',
@@ -2139,10 +2153,62 @@ function fmtRange(ev){
   return `${start}<span class="arrow">→</span>${end}`;
 }
 
+// Rendez-vous dont l'empreinte bancaire n'a pas été confirmée plus d'1h après la création du RDV
+// (créé le = horodatage Google Calendar, pas notre timestamp interne côté Stripe, pour que ça
+// remonte même si l'empreinte n'a jamais été lancée). Purement informatif : ne supprime ni ne
+// modifie rien, juste une liste consultable via le badge.
+function getEventsSansEmpreinte(){
+  const seuilMs = 60 * 60 * 1000; // 1h
+  return events
+    .filter(ev => ev.paymentStatus !== 'confirme' && ev.created && (Date.now() - new Date(ev.created).getTime()) > seuilMs)
+    .sort((a, b) => new Date(a.created) - new Date(b.created));
+}
+
+function openSansEmpreinteModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const liste = getEventsSansEmpreinte();
+  const rowsHtml = liste.map(ev => {
+    const parts = parseParts(ev.raw);
+    const heures = Math.floor((Date.now() - new Date(ev.created).getTime()) / 3600000);
+    const dateAffichage = ev.startD.toLocaleDateString('fr-FR', {weekday:'short', day:'numeric', month:'short'});
+    const heureAffichage = ev.allDay ? '' : ev.startD.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+    return `
+      <div class="sans-empreinte-row">
+        <div class="sr-info">
+          <div class="sr-model">${escapeHtml(parts ? parts.model : ev.raw)}</div>
+          <div class="sr-meta">${dateAffichage}${heureAffichage ? ' à ' + heureAffichage : ''} · créé il y a ${heures}h</div>
+        </div>
+        <div class="comment-btn empreinte-btn-modal" data-id="${ev.id}" data-nom="${encodeURIComponent(ev.raw || '')}">🔒 Empreinte</div>
+      </div>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>Sans empreinte bancaire (+1h)</h3>
+      ${liste.length === 0 ? '<div class="field"><label>Aucun rendez-vous concerné.</label></div>' : `<div class="sans-empreinte-list">${rowsHtml}</div>`}
+      <div class="modal-actions">
+        <button class="btn-cancel" id="closeSansEmpreinte">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('closeSansEmpreinte').onclick = () => overlay.remove();
+  overlay.querySelectorAll('.empreinte-btn-modal').forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.id;
+      const nom = decodeURIComponent(el.dataset.nom);
+      overlay.remove();
+      openEmpreinteModal(id, nom);
+    };
+  });
+}
+
 function renderList(){
   const activeEvents = events.filter(e => !e.paused);
   const doneCount = activeEvents.filter(e => e.done).length;
   const pausedCount = events.filter(e => e.paused).length;
+  const sansEmpreinte = getEventsSansEmpreinte();
   const today = new Date();
   const todayKey = dayKey(today);
   const headerDate = today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
@@ -2307,6 +2373,7 @@ function renderList(){
       <div class="pill"><b>${doneCount}</b> terminés</div>
       <div class="pill"><b>${activeEvents.length - doneCount}</b> restants</div>
       ${pausedCount > 0 ? `<div class="pill"><b>${pausedCount}</b> en pause</div>` : ''}
+      ${sansEmpreinte.length > 0 ? `<div class="pill pill-warning" id="sansEmpreintePill">🔒 <b>${sansEmpreinte.length}</b> sans empreinte (+1h)</div>` : ''}
     </div>
     <div class="list">${renderRemoteTasksHtml()}${listHtml}</div>
   `;
@@ -2415,6 +2482,9 @@ function renderList(){
   document.querySelectorAll('.empreinte-btn').forEach(el => {
     el.onclick = () => openEmpreinteModal(el.dataset.id, decodeURIComponent(el.dataset.nom));
   });
+  if(document.getElementById('sansEmpreintePill')){
+    document.getElementById('sansEmpreintePill').onclick = () => openSansEmpreinteModal();
+  }
   document.querySelectorAll('.transcript-btn').forEach(el => {
     el.onclick = () => {
       const ev = events.find(e => e.id === el.dataset.id);
