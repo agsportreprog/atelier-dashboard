@@ -103,6 +103,8 @@
   }
   .card.done{opacity:.7;}
   .card.paused{opacity:.78;}
+  .card.block-card{border-color:#e0785a55; background:#e0785a0d;}
+  .card.block-card .time{background:#e0785a1a; color:#e0785a;}
   .card.paused .time{background:#ffc94622;}
   .card.inprogress .time{background:var(--cours-dim);}
   .card.has-courtesy{border-left:3px solid var(--courtesy);}
@@ -385,6 +387,7 @@ const TARIF_BASE_KEY = 'atelier_tarif_base';                // prix catalogue ch
 const TARIF_REDUCTION_KEY = 'atelier_tarif_reduction_pct';  // réduction en % appliquée au tarif de base
 const TARIF_MANUEL_KEY = 'atelier_tarif_manuel';            // tarif saisi à la main, prioritaire sur base+réduction s'il est présent
 const TARIF_FINAL_KEY = 'atelier_tarif_final';               // tarif réellement affiché/retenu — manuel si présent, sinon base réduit, sinon base
+const BLOCK_TYPE_KEY = 'atelier_type';                        // 'blocage' pour un créneau fermé manuellement (pas un vrai RDV) — voir openBlockModal
 const COURTESY_CARS = { audi: 'Audi A4 (diesel)', twingo: 'Twingo (éthanol)', c3: 'C3 (diesel)' };
 
 // Catalogue des prestations pour la liste déroulante de la case "Tarif" — mêmes prix que ceux
@@ -690,7 +693,8 @@ function mapEvent(ev){
     tarifBase: priv[TARIF_BASE_KEY] || '',
     tarifReductionPct: priv[TARIF_REDUCTION_KEY] || '',
     tarifManuel: priv[TARIF_MANUEL_KEY] || '',
-    tarifFinal: priv[TARIF_FINAL_KEY] || ''
+    tarifFinal: priv[TARIF_FINAL_KEY] || '',
+    isBlock: priv[BLOCK_TYPE_KEY] === 'blocage'
   };
 }
 
@@ -1414,6 +1418,114 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, c
     }, courtesy ? '6' : undefined);
   }
   return created.id;
+}
+
+// Crée un blocage de créneau (fermeture exceptionnelle, formation, vacances...) : un événement Google
+// Agenda normal, marqué atelier_type=blocage, qui rend le créneau indisponible pour l'assistant IA
+// (côté public-booking-api : bloque tout le jour pour les grosses prestations Stage1/Flexfuel — pas de
+// granularité demi-journée possible pour celles-ci — et bloque précisément la plage choisie pour le
+// diagnostic rapide 30 min). Toujours en dateTime (jamais un événement "jour entier" Google), même pour
+// une journée complète, pour rester compatible avec le scan par horaires de check_creneaux_diagnostic.
+async function createBlockEvent({date, label, fullDay, startTime, endTime}){
+  const summary = `🚫 ${label || 'Atelier fermé'}`;
+  const debut = fullDay ? '08:00' : startTime;
+  const fin = fullDay ? '19:00' : endTime;
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
+  const body = {
+    summary,
+    start: { dateTime: `${date}T${debut}:00`, timeZone: 'Europe/Paris' },
+    end: { dateTime: `${date}T${fin}:00`, timeZone: 'Europe/Paris' }
+  };
+  const res = await authFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    alert("Impossible de créer le blocage. Réessaie dans quelques instants.");
+    return false;
+  }
+  const created = await res.json();
+  await patchPrivateProps(created.id, { [BLOCK_TYPE_KEY]: 'blocage' });
+  return created.id;
+}
+
+async function deleteBlockEvent(id){
+  if(!confirm('Supprimer ce blocage ? Le créneau redeviendra disponible pour les rendez-vous.')) return;
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
+  const res = await authFetch(url, { method: 'DELETE' });
+  if(!res.ok && res.status !== 410){
+    alert('Impossible de supprimer ce blocage. Réessaie dans quelques instants.');
+    return;
+  }
+  fetchEvents();
+}
+
+function openBlockModal(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const today = new Date().toISOString().slice(0, 10);
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>🚫 Bloquer un créneau</h3>
+      <div class="field required">
+        <label>Date</label>
+        <input id="blockDate" type="date" value="${today}">
+      </div>
+      <div class="field">
+        <label class="checkbox-row" style="text-transform:none; letter-spacing:0; font-size:14px; display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="blockFullDay"> Journée complète
+        </label>
+      </div>
+      <div id="blockTimesRow" style="display:flex; gap:12px;">
+        <div class="field" style="flex:1;">
+          <label>Début</label>
+          <input id="blockStart" type="time" value="14:00">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>Fin</label>
+          <input id="blockEnd" type="time" value="18:00">
+        </div>
+      </div>
+      <div class="field">
+        <label>Motif (optionnel, visible dans l'agenda)</label>
+        <input id="blockLabel" type="text" placeholder="ex : Fermeture exceptionnelle">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelBlock">Annuler</button>
+        <button class="btn-save" id="saveBlock">Bloquer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.getElementById('cancelBlock').onclick = () => overlay.remove();
+  document.getElementById('blockFullDay').onchange = (e) => {
+    document.getElementById('blockTimesRow').style.display = e.target.checked ? 'none' : 'flex';
+  };
+  document.getElementById('saveBlock').onclick = async () => {
+    const date = document.getElementById('blockDate').value;
+    const fullDay = document.getElementById('blockFullDay').checked;
+    const startTime = document.getElementById('blockStart').value;
+    const endTime = document.getElementById('blockEnd').value;
+    const label = document.getElementById('blockLabel').value.trim();
+    if(!date){ alert('Choisis une date.'); return; }
+    if(!fullDay && (!startTime || !endTime || startTime >= endTime)){
+      alert('Vérifie les horaires (début avant fin).');
+      return;
+    }
+    const btn = document.getElementById('saveBlock');
+    btn.disabled = true;
+    btn.textContent = 'Création...';
+    const ok = await createBlockEvent({date, label, fullDay, startTime, endTime});
+    if(ok){
+      overlay.remove();
+      fetchEvents();
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Bloquer';
+    }
+  };
 }
 
 // Récupère le suffixe de marqueurs (💰 tarif, puis 🚗 courtoisie) déjà présent à la fin du titre
@@ -2240,6 +2352,22 @@ function renderList(){
       cardsHtml = `<div class="empty" style="padding:24px 20px"><div class="big">Rien de prévu</div></div>`;
     } else {
       cardsHtml = dayEvents.map(ev => {
+        // Carte simplifiée pour un créneau bloqué manuellement (fermeture, formation...) — pas un vrai
+        // RDV, donc aucun des boutons habituels (tarif, empreinte, performances...) n'a de sens ici.
+        if(ev.isBlock){
+          return `
+            <div class="card block-card">
+              <div class="card-top">
+                <div class="time">${fmtRange(ev)}<span>BLOQUÉ</span></div>
+                <div class="body">
+                  <div class="raw">${escapeHtml(ev.raw)}</div>
+                  <div class="action-links">
+                    <div class="comment-btn delete-block-btn" data-id="${ev.id}">🗑 Supprimer le blocage</div>
+                  </div>
+                </div>
+              </div>
+            </div>`;
+        }
         const parts = parseParts(ev.raw);
         const spansMultiple = dayKey(ev.startD) !== dayKey(ev.endD);
         const body = parts
@@ -2359,6 +2487,7 @@ function renderList(){
         <button id="searchBtn">🔍 Rechercher</button>
         ${config.publicBookingWorkerUrl ? `<button id="openConvBtn">💬 Conversations sans RDV</button>` : ''}
         <button id="newEventBtn">+ Nouveau RDV</button>
+        <button id="blockSlotBtn">🚫 Bloquer un créneau</button>
         <label class="checkbox-row" style="margin:0 4px;">
           <input type="checkbox" id="vueMoisCheck" ${vueMois ? 'checked' : ''}> Voir le mois
         </label>
@@ -2393,6 +2522,7 @@ function renderList(){
   document.getElementById('searchBtn').onclick = openSearchModal;
   if(document.getElementById('openConvBtn')) document.getElementById('openConvBtn').onclick = openConversationsModal;
   document.getElementById('newEventBtn').onclick = openNewEventModal;
+  document.getElementById('blockSlotBtn').onclick = openBlockModal;
   document.getElementById('vueMoisCheck').onchange = (e) => {
     vueMois = e.target.checked;
     fetchEvents();
@@ -2485,6 +2615,9 @@ function renderList(){
   if(document.getElementById('sansEmpreintePill')){
     document.getElementById('sansEmpreintePill').onclick = () => openSansEmpreinteModal();
   }
+  document.querySelectorAll('.delete-block-btn').forEach(el => {
+    el.onclick = () => deleteBlockEvent(el.dataset.id);
+  });
   document.querySelectorAll('.transcript-btn').forEach(el => {
     el.onclick = () => {
       const ev = events.find(e => e.id === el.dataset.id);
