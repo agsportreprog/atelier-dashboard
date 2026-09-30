@@ -105,6 +105,53 @@
   .card.paused{opacity:.78;}
   .card.block-card{border-color:#e0785a55; background:#e0785a0d;}
   .card.block-card .time{background:#e0785a1a; color:#e0785a;}
+
+  /* Vue calendrier mensuel — grille cliquable pour sauter directement sur un jour, sans scroller
+     la liste depuis aujourd'hui (utile pour un RDV pris loin dans le temps). */
+  .cal-wrap{padding:4px 4px 24px;}
+  .cal-nav{
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    padding:8px 0 18px;
+  }
+  .cal-nav-btn{
+    background:var(--panel-2); border:1px solid var(--line-solid); color:var(--text);
+    width:34px; height:34px; border-radius:9px; font-size:14px; cursor:pointer;
+  }
+  .cal-nav-btn:hover{background:var(--panel);}
+  .cal-month-label{font-size:17px; font-weight:700; text-transform:capitalize; min-width:170px; text-align:center;}
+  .cal-today-btn{
+    background:var(--accent-dim); border:1px solid transparent; color:var(--accent);
+    font-weight:700; font-size:12px; padding:8px 14px; border-radius:9px; cursor:pointer; margin-left:8px;
+  }
+  .cal-today-btn:hover{background:#ff6a2b33;}
+  .cal-grid{
+    display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; max-width:840px; margin:0 auto;
+  }
+  .cal-weekday{
+    text-align:center; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--text-dim); padding-bottom:6px;
+  }
+  .cal-cell{
+    position:relative; aspect-ratio:1; border:1px solid var(--line-solid); border-radius:10px;
+    background:var(--panel); padding:8px; cursor:pointer; transition:background .15s, transform .1s;
+  }
+  .cal-cell:hover{background:var(--panel-2); transform:translateY(-1px);}
+  .cal-cell.cal-outside{opacity:.35;}
+  .cal-cell.cal-today{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset;}
+  .cal-cell.cal-has-events{background:var(--accent-dim);}
+  .cal-daynum{font-size:13px; font-weight:700;}
+  .cal-count{
+    position:absolute; bottom:8px; right:8px; min-width:20px; height:20px; padding:0 5px;
+    border-radius:10px; background:var(--accent); color:#fff; font-size:11px; font-weight:800;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .cal-block-tag{position:absolute; bottom:8px; left:8px; font-size:12px;}
+  .cal-hint{text-align:center; color:var(--text-dim); font-size:12px; margin-top:16px;}
+  @media (max-width: 640px){
+    .cal-daynum{font-size:11px;}
+    .cal-count{min-width:16px; height:16px; font-size:9px;}
+    .cal-month-label{font-size:15px; min-width:120px;}
+  }
   .card.paused .time{background:#ffc94622;}
   .card.inprogress .time{background:var(--cours-dim);}
   .card.has-courtesy{border-left:3px solid var(--courtesy);}
@@ -645,8 +692,32 @@ function markConnectionLost(){
 let vueMois = false; // false = 3 jours (par défaut), true = jusqu'à 31 jours à partir d'aujourd'hui
 function joursAffiches(){ return vueMois ? 31 : 3; }
 
+// Vue calendrier mensuel : grille du mois cliquable, pour sauter directement sur un jour précis
+// (ex : un RDV pris fin octobre) sans avoir à scroller la liste jour par jour depuis aujourd'hui,
+// qui devient injouable au-delà de quelques semaines.
+let vueCalendrier = false;
+let calendrierMonth = startOfMonth(new Date()); // 1er du mois actuellement affiché dans la grille
+let focusDate = null; // jour choisi dans la grille : ancre la liste sur ce jour au lieu d'aujourd'hui
+
+function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+// Lundi de la semaine contenant d (la semaine commence le lundi, convention FR)
+function mondayOfWeek(d){
+  const jour = d.getDay(); // 0 = dimanche ... 6 = samedi
+  const decalage = jour === 0 ? -6 : 1 - jour;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + decalage);
+}
+
 function windowRange(){
-  const now = new Date();
+  if(vueCalendrier){
+    // Toute la grille affichée (semaines entières, y compris les jours du mois précédent/suivant
+    // visibles en début/fin de grille), pas seulement le 1er-dernier du mois.
+    const debutGrille = mondayOfWeek(calendrierMonth);
+    const finMoisAffiche = new Date(calendrierMonth.getFullYear(), calendrierMonth.getMonth() + 1, 0);
+    const finSemaineFinMois = mondayOfWeek(finMoisAffiche);
+    const finGrille = new Date(finSemaineFinMois.getFullYear(), finSemaineFinMois.getMonth(), finSemaineFinMois.getDate() + 6, 23,59,59);
+    return { timeMin: debutGrille.toISOString(), timeMax: finGrille.toISOString(), start: debutGrille, end: finGrille };
+  }
+  const now = focusDate || new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0,0,0);
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + joursAffiches() - 1, 23,59,59);
   return { timeMin: start.toISOString(), timeMax: end.toISOString(), start, end };
@@ -2316,6 +2387,59 @@ function openSansEmpreinteModal(){
   });
 }
 
+// Grille du mois affiché en vue calendrier : 6 semaines entières (42 jours, toujours assez pour
+// n'importe quel mois), chaque jour cliquable pour sauter directement dessus dans la liste — c'est
+// ce qui permet de retrouver en 2 clics un RDV pris loin dans le temps (ex : fin du mois prochain)
+// sans scroller jour par jour depuis aujourd'hui.
+function buildCalendarGridHtml(){
+  const todayKey = dayKey(new Date());
+  const nomMois = calendrierMonth.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+  const debutGrille = mondayOfWeek(calendrierMonth);
+
+  const cellules = [];
+  for(let i = 0; i < 42; i++){
+    const d = new Date(debutGrille.getFullYear(), debutGrille.getMonth(), debutGrille.getDate() + i);
+    const key = dayKey(d);
+    const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59);
+    const dayEvents = events.filter(ev => ev.startD <= dEnd && ev.endD >= d && !ev.paused);
+    const hasBlock = dayEvents.some(ev => ev.isBlock);
+    const rdvCount = dayEvents.filter(ev => !ev.isBlock).length;
+    cellules.push({
+      key,
+      jourNum: d.getDate(),
+      rdvCount,
+      hasBlock,
+      horsMois: d.getMonth() !== calendrierMonth.getMonth(),
+      isToday: key === todayKey
+    });
+  }
+
+  const enTetes = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(j => `<div class="cal-weekday">${j}</div>`).join('');
+  const jours = cellules.map(c => `
+    <div class="cal-cell ${c.horsMois ? 'cal-outside' : ''} ${c.isToday ? 'cal-today' : ''} ${c.rdvCount > 0 ? 'cal-has-events' : ''}" data-date="${c.key}">
+      <div class="cal-daynum">${c.jourNum}</div>
+      ${c.rdvCount > 0 ? `<div class="cal-count">${c.rdvCount}</div>` : ''}
+      ${c.hasBlock ? `<div class="cal-block-tag">🚫</div>` : ''}
+    </div>
+  `).join('');
+
+  return `
+    <div class="cal-wrap">
+      <div class="cal-nav">
+        <button id="calPrevBtn" class="cal-nav-btn">◀</button>
+        <div class="cal-month-label">${nomMois}</div>
+        <button id="calNextBtn" class="cal-nav-btn">▶</button>
+        <button id="calTodayBtn" class="cal-today-btn">Aujourd'hui</button>
+      </div>
+      <div class="cal-grid">
+        ${enTetes}
+        ${jours}
+      </div>
+      <div class="cal-hint">Clique sur un jour pour voir ses rendez-vous.</div>
+    </div>
+  `;
+}
+
 function renderList(){
   const activeEvents = events.filter(e => !e.paused);
   const doneCount = activeEvents.filter(e => e.done).length;
@@ -2323,16 +2447,23 @@ function renderList(){
   const sansEmpreinte = getEventsSansEmpreinte();
   const today = new Date();
   const todayKey = dayKey(today);
-  const headerDate = today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
+  const headerDate = vueCalendrier
+    ? calendrierMonth.toLocaleDateString('fr-FR', {month:'long', year:'numeric'})
+    : today.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long'});
 
-  // construit les jours de la fenêtre (3 par défaut, jusqu'à 31 en vue mois)
+  let listHtml = '';
+  if(vueCalendrier){
+    listHtml = buildCalendarGridHtml();
+  } else {
+  // construit les jours de la fenêtre (3 par défaut, jusqu'à 31 en vue mois), ancrée sur focusDate
+  // si un jour a été choisi depuis la grille du calendrier, sinon sur aujourd'hui.
+  const anchor = focusDate || today;
   const days = [];
   for(let i = 0; i < joursAffiches(); i++){
-    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    const d = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i);
     days.push(d);
   }
 
-  let listHtml = '';
   days.forEach(d => {
     const key = dayKey(d);
     const dEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59);
@@ -2465,6 +2596,7 @@ function renderList(){
       ${cardsHtml}
     `;
   });
+  }
 
   app.innerHTML = `
     <div class="topbar">
@@ -2488,9 +2620,12 @@ function renderList(){
         ${config.publicBookingWorkerUrl ? `<button id="openConvBtn">💬 Conversations sans RDV</button>` : ''}
         <button id="newEventBtn">+ Nouveau RDV</button>
         <button id="blockSlotBtn">🚫 Bloquer un créneau</button>
+        <button id="calendarViewBtn">${vueCalendrier ? '📋 Vue liste' : '📆 Vue calendrier'}</button>
+        ${!vueCalendrier ? `
         <label class="checkbox-row" style="margin:0 4px;">
           <input type="checkbox" id="vueMoisCheck" ${vueMois ? 'checked' : ''}> Voir le mois
-        </label>
+        </label>` : ''}
+        ${!vueCalendrier && focusDate ? `<button id="backTodayBtn">↩ Aujourd'hui</button>` : ''}
         <button id="refreshBtn">↻ Actualiser</button>
         <button id="scanMailBtn">📧 Vérifier les mails</button>
         <button id="slaveRecapBtn">📋 Récap du mois</button>
@@ -2498,13 +2633,14 @@ function renderList(){
       </div>
     </div>
     <div class="counts">
+      ${!vueCalendrier ? `
       <div class="pill"><b>${activeEvents.length}</b> véhicules (${vueMois ? '31 jours' : '3 jours'})</div>
       <div class="pill"><b>${doneCount}</b> terminés</div>
       <div class="pill"><b>${activeEvents.length - doneCount}</b> restants</div>
-      ${pausedCount > 0 ? `<div class="pill"><b>${pausedCount}</b> en pause</div>` : ''}
+      ${pausedCount > 0 ? `<div class="pill"><b>${pausedCount}</b> en pause</div>` : ''}` : ''}
       ${sansEmpreinte.length > 0 ? `<div class="pill pill-warning" id="sansEmpreintePill">🔒 <b>${sansEmpreinte.length}</b> sans empreinte (+1h)</div>` : ''}
     </div>
-    <div class="list">${renderRemoteTasksHtml()}${listHtml}</div>
+    <div class="list">${vueCalendrier ? listHtml : renderRemoteTasksHtml() + listHtml}</div>
   `;
 
   if(connectionLost){
@@ -2523,10 +2659,51 @@ function renderList(){
   if(document.getElementById('openConvBtn')) document.getElementById('openConvBtn').onclick = openConversationsModal;
   document.getElementById('newEventBtn').onclick = openNewEventModal;
   document.getElementById('blockSlotBtn').onclick = openBlockModal;
-  document.getElementById('vueMoisCheck').onchange = (e) => {
-    vueMois = e.target.checked;
+  document.getElementById('calendarViewBtn').onclick = () => {
+    if(vueCalendrier){
+      // Retour à la liste classique, ancrée sur aujourd'hui.
+      vueCalendrier = false;
+      focusDate = null;
+    } else {
+      vueCalendrier = true;
+      calendrierMonth = startOfMonth(focusDate || new Date());
+    }
     fetchEvents();
   };
+  if(document.getElementById('vueMoisCheck')){
+    document.getElementById('vueMoisCheck').onchange = (e) => {
+      vueMois = e.target.checked;
+      fetchEvents();
+    };
+  }
+  if(document.getElementById('backTodayBtn')){
+    document.getElementById('backTodayBtn').onclick = () => {
+      focusDate = null;
+      fetchEvents();
+    };
+  }
+  if(vueCalendrier){
+    document.getElementById('calPrevBtn').onclick = () => {
+      calendrierMonth = new Date(calendrierMonth.getFullYear(), calendrierMonth.getMonth() - 1, 1);
+      fetchEvents();
+    };
+    document.getElementById('calNextBtn').onclick = () => {
+      calendrierMonth = new Date(calendrierMonth.getFullYear(), calendrierMonth.getMonth() + 1, 1);
+      fetchEvents();
+    };
+    document.getElementById('calTodayBtn').onclick = () => {
+      calendrierMonth = startOfMonth(new Date());
+      fetchEvents();
+    };
+    document.querySelectorAll('.cal-cell').forEach(el => {
+      el.onclick = () => {
+        const [y, m, d] = el.dataset.date.split('-').map(Number);
+        focusDate = new Date(y, m - 1, d);
+        vueCalendrier = false;
+        fetchEvents();
+      };
+    });
+  }
   document.getElementById('settingsBtn').onclick = renderSetup;
   document.querySelectorAll('.cours-btn').forEach(el => {
     el.onclick = () => {
