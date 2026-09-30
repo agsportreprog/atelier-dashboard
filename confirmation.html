@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AG Sport Reprog — Confirmation</title>
+<style>
+  :root{
+    --bg:#14171c; --panel:#1c2028; --panel-2:#23272f; --text:#f2f3f5; --text-dim:#9aa1ad;
+    --accent:#ff6a2b; --line:#2c313b; --ok:#3ecf8e; --ok-dim:#3ecf8e22;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:24px;
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:18px;
+    padding:40px 32px; max-width:440px; width:100%; text-align:center;
+  }
+  .icon{
+    width:64px; height:64px; border-radius:50%; margin:0 auto 20px; display:flex; align-items:center; justify-content:center;
+    font-size:32px;
+  }
+  .icon.success{background:var(--ok-dim); color:var(--ok);}
+  .icon.cancel{background:var(--panel-2); color:var(--text-dim);}
+  h1{font-size:22px; margin:0 0 12px;}
+  p{font-size:15px; color:var(--text-dim); line-height:1.55; margin:0 0 8px;}
+  .brand{
+    display:inline-flex; align-items:center; gap:8px; margin-top:28px; padding-top:20px;
+    border-top:1px solid var(--line); color:var(--text-dim); font-size:13px;
+  }
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--accent);}
+  a{color:var(--accent); text-decoration:none;}
+</style>
+</head>
+<body>
+  <div class="card" id="card"></div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+    const card = document.getElementById('card');
+    if(status === 'cancel'){
+      card.innerHTML = `
+        <div class="icon cancel">✕</div>
+        <h1>Enregistrement non terminé</h1>
+        <p>Vous pouvez fermer cette page. Si vous rencontrez un souci pour enregistrer votre carte, contactez-nous directement au <a href="tel:0769377092">07 69 37 70 92</a>.</p>
+        <div class="brand"><span class="dot"></span> AG Sport Reprog</div>
+      `;
+    } else {
+      card.innerHTML = `
+        <div class="icon success">✓</div>
+        <h1>Rendez-vous confirmé</h1>
+        <p>Votre carte a bien été enregistrée (aucun débit n'a été effectué). Votre rendez-vous chez AG Sport Reprog est confirmé.</p>
+        <p>Vous pouvez fermer cette page. À bientôt !</p>
+        <div class="brand"><span class="dot"></span> AG Sport Reprog — <a href="tel:0769377092">07 69 37 70 92</a></div>
+      `;
+    }
+  </script>
+</body>
+</html>
