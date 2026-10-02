@@ -1966,9 +1966,14 @@ async function openNewEventModal(){
     document.querySelectorAll('.mc-cell:not(.mc-empty)').forEach(el => {
       el.onclick = () => {
         selectedDate = el.dataset.date;
+        // Changer .value par JS ne déclenche pas l'événement "change" du champ date — on doit donc
+        // rappeler nous-mêmes tout ce qui en dépend normalement (dispo courtoisie, suggestion d'heure
+        // de départ), sinon ça reste calculé sur l'ancienne date choisie.
         document.getElementById('newDate').value = selectedDate;
         renderMiniCal();
         renderDayAgenda();
+        refreshCourtesyAvailability();
+        suggererHeureDepart();
       };
     });
   }
@@ -2032,23 +2037,23 @@ async function openNewEventModal(){
   // mois, chargés plus bas pour le mini-calendrier) plutôt que sur la liste `events` globale, qui
   // ne contient que les quelques jours actuellement affichés dans le Planning.
   function getBusyCourtesyKeysFromUpcoming(dateFrom, dateTo){
-    const from = new Date(dateFrom + 'T00:00:00');
-    const to = new Date((dateTo || dateFrom) + 'T23:59:59');
+    const to = dateTo || dateFrom;
     const busy = new Set();
     allUpcomingEvents.forEach(ev => {
       if(!ev.courtesyCar) return;
-      let evStart, evEnd;
+      // Comparaison en texte AAAA-MM-JJ (triable directement) plutôt qu'avec des objets Date qui
+      // incluent une heure/fuseau — on évite ainsi tout décalage d'un jour selon l'heure locale.
+      let debut = ev.dateStr;
+      let fin = ev.dateStr;
       if(ev.isMultiDay){
-        evStart = new Date(ev.start + 'T00:00:00');
-        evEnd = new Date(new Date(ev.end).getTime() - 1); // fin exclusive côté Google -> on la rend incluse
-      } else if(ev.allDay){
-        evStart = new Date(ev.start + 'T00:00:00');
-        evEnd = new Date(ev.start + 'T23:59:59');
-      } else {
-        evStart = new Date(ev.start);
-        evEnd = new Date(ev.end);
+        debut = ev.start.slice(0, 10);
+        // ev.end est la borne EXCLUSIVE fournie par Google (le lendemain du dernier jour réel) —
+        // on retire un jour pour obtenir le dernier jour réellement occupé par le véhicule.
+        const finExclusive = new Date(ev.end.slice(0, 10) + 'T00:00:00');
+        finExclusive.setDate(finExclusive.getDate() - 1);
+        fin = dayKey(finExclusive);
       }
-      if(evStart <= to && evEnd >= from) busy.add(ev.courtesyCar);
+      if(debut <= to && fin >= dateFrom) busy.add(ev.courtesyCar);
     });
     return busy;
   }
