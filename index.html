@@ -1885,7 +1885,7 @@ async function openNewEventModal(){
           </div>
           <div class="field">
             <label>Véhicule de courtoisie prêté</label>
-            <select id="newCourtesy">${buildCourtesyOptionsHtml(getBusyCourtesyKeys(today, today), '')}</select>
+            <select id="newCourtesy">${buildCourtesyOptionsHtml(new Set(), '')}</select>
           </div>
         </div>
         <div class="newevent-right">
@@ -2027,6 +2027,32 @@ async function openNewEventModal(){
     refreshCourtesyAvailability();
   });
 
+  // Disponibilité des voitures de courtoisie POUR LA DATE CHOISIE dans le formulaire (ex : le 20
+  // novembre), pas pour aujourd'hui — on se base donc sur allUpcomingEvents (RDV des 3 prochains
+  // mois, chargés plus bas pour le mini-calendrier) plutôt que sur la liste `events` globale, qui
+  // ne contient que les quelques jours actuellement affichés dans le Planning.
+  function getBusyCourtesyKeysFromUpcoming(dateFrom, dateTo){
+    const from = new Date(dateFrom + 'T00:00:00');
+    const to = new Date((dateTo || dateFrom) + 'T23:59:59');
+    const busy = new Set();
+    allUpcomingEvents.forEach(ev => {
+      if(!ev.courtesyCar) return;
+      let evStart, evEnd;
+      if(ev.isMultiDay){
+        evStart = new Date(ev.start + 'T00:00:00');
+        evEnd = new Date(new Date(ev.end).getTime() - 1); // fin exclusive côté Google -> on la rend incluse
+      } else if(ev.allDay){
+        evStart = new Date(ev.start + 'T00:00:00');
+        evEnd = new Date(ev.start + 'T23:59:59');
+      } else {
+        evStart = new Date(ev.start);
+        evEnd = new Date(ev.end);
+      }
+      if(evStart <= to && evEnd >= from) busy.add(ev.courtesyCar);
+    });
+    return busy;
+  }
+
   function refreshCourtesyAvailability(){
     const sel = document.getElementById('newCourtesy');
     const currentValue = sel.value;
@@ -2034,7 +2060,7 @@ async function openNewEventModal(){
     const dateFrom = document.getElementById('newDate').value;
     const dateTo = isMulti ? document.getElementById('newEndDate').value : dateFrom;
     if(!dateFrom) return;
-    sel.innerHTML = buildCourtesyOptionsHtml(getBusyCourtesyKeys(dateFrom, dateTo), currentValue);
+    sel.innerHTML = buildCourtesyOptionsHtml(getBusyCourtesyKeysFromUpcoming(dateFrom, dateTo), currentValue);
   }
   document.getElementById('newDate').addEventListener('change', refreshCourtesyAvailability);
   document.getElementById('newEndDate').addEventListener('change', refreshCourtesyAvailability);
@@ -2108,6 +2134,7 @@ async function openNewEventModal(){
   renderMiniCal();
   renderMonthSummary();
   renderDayAgenda();
+  refreshCourtesyAvailability(); // les RDV des 3 prochains mois viennent d'arriver : on recalcule la dispo courtoisie pour la date déjà sélectionnée
 
   document.getElementById('saveNewEvent').onclick = async () => {
     const nom = document.getElementById('newNom').value.trim();
