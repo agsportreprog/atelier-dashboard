@@ -344,6 +344,8 @@
     display:flex; gap:12px; align-items:flex-start; background:var(--panel-2);
     border:1px solid var(--line-solid); border-radius:10px; padding:10px 12px;
   }
+  .search-result.clickable{cursor:pointer;}
+  .search-result.clickable:hover{border-color:var(--accent);}
   .sr-date{font-family:var(--mono); font-size:11px; color:var(--text-dim); width:72px; flex-shrink:0; padding-top:2px;}
   .sr-body{flex:1; min-width:0;}
   .sr-title{font-size:14px; font-weight:700;}
@@ -1639,8 +1641,12 @@ async function updateEventDetails(id, {summary, date, startTime, endTime, isMult
   return true;
 }
 
-function openEditEventModal(id){
-  const ev = events.find(e => e.id === id);
+// preloadedEvent (optionnel) : passe directement l'événement déjà mappé (ex. depuis la recherche,
+// qui interroge Google Calendar sur une large plage indépendante de la fenêtre affichée) plutôt que
+// de le chercher dans le tableau "events", qui lui ne couvre que les jours actuellement affichés et
+// pourrait ne pas contenir ce rendez-vous (RDV passé, ou au-delà de la fenêtre en cours).
+function openEditEventModal(id, preloadedEvent){
+  const ev = preloadedEvent || events.find(e => e.id === id);
   if(!ev) return;
   const parts = parseParts(ev.raw) || { model: ev.raw, presta: '', phone: '' };
   const overlay = document.createElement('div');
@@ -1701,6 +1707,17 @@ function openEditEventModal(id){
     document.getElementById('editSingleDayFields').style.display = e.target.checked ? 'none' : '';
     document.getElementById('editMultiDayFields').style.display = e.target.checked ? '' : 'none';
   });
+  // Si on recule/avance la date de début d'un RDV "plusieurs jours", la date de fin ("Jusqu'au")
+  // garde sinon son ancienne valeur sans qu'on s'en rende compte, et on peut valider un "jusqu'au"
+  // antérieur au début (RDV invalide côté Google Agenda, qui disparaît ensuite des vues par date
+  // tout en restant trouvable par la recherche) — on la ramène automatiquement sur la nouvelle date
+  // de début dès qu'elle devient incohérente.
+  document.getElementById('editDate').addEventListener('change', (e) => {
+    const endDateInput = document.getElementById('editEndDate');
+    if(document.getElementById('editMultiDay').checked && endDateInput.value && endDateInput.value < e.target.value){
+      endDateInput.value = e.target.value;
+    }
+  });
 
   document.getElementById('saveEdit').onclick = async () => {
     const model = document.getElementById('editModel').value.trim();
@@ -1717,6 +1734,10 @@ function openEditEventModal(id){
     }
     if(isMultiDay && !endDate){
       alert('Renseigne le dernier jour de garde du véhicule.');
+      return;
+    }
+    if(isMultiDay && endDate < date){
+      alert('La date "Jusqu\'au" est avant la date de début : corrige la date de fin avant d\'enregistrer.');
       return;
     }
     if(!isMultiDay && (!startTime || !endTime)){
@@ -2165,6 +2186,10 @@ async function openNewEventModal(){
     }
     if(isMultiDay && !endDate){
       alert('Renseigne le dernier jour de garde du véhicule.');
+      return;
+    }
+    if(isMultiDay && endDate < date){
+      alert('La date "Jusqu\'au" est avant la date de début : corrige la date de fin avant d\'enregistrer.');
       return;
     }
     if(!isMultiDay && (!startTime || !endTime)){
@@ -3123,8 +3148,10 @@ async function runSearch(query){
       const statusLabel = ev.done ? 'Fait' : (ev.paused ? 'En pause' : (ev.inProgress ? 'En cours' : 'Prévu'));
       return {
         date: ev.startD,
+        id: ev.id,
+        ev, // événement déjà mappé, réutilisé tel quel à l'ouverture (voir openEditEventModal plus haut)
         html: `
-          <div class="search-result">
+          <div class="search-result clickable" data-event-id="${ev.id}" title="Cliquer pour ouvrir ce rendez-vous">
             <div class="sr-date">${ev.startD.toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'numeric'})}</div>
             <div class="sr-body">
               <div class="sr-title">${escapeHtml(label)}</div>
@@ -3146,6 +3173,18 @@ async function runSearch(query){
   }
 
   resultsEl.innerHTML = allResults.map(r => r.html).join('');
+
+  // clic sur un résultat "rendez-vous" (calendrier) : ouvre directement la fiche de modification,
+  // avec l'événement déjà récupéré par la recherche — pas besoin qu'il soit dans la fenêtre affichée.
+  resultsEl.querySelectorAll('.search-result[data-event-id]').forEach(el => {
+    el.onclick = () => {
+      const match = eventMatches.find(r => r.id === el.dataset.eventId);
+      if(!match) return;
+      const overlay = resultsEl.closest('.modal-overlay');
+      if(overlay) overlay.remove();
+      openEditEventModal(match.id, match.ev);
+    };
+  });
 }
 
 function escapeHtml(s){
