@@ -212,6 +212,8 @@
   .comment-at summary::-webkit-details-marker{display:none;}
   .comment-at[open] summary{opacity:1;}
   .comment-at span{display:inline-block; margin-left:4px; padding:1px 7px; border-radius:10px; background:var(--panel); color:var(--text); font-size:11px; font-family:var(--mono);}
+  .rdv-at{margin-left:0; font-size:12px;}
+  .rdv-at span{display:block; width:fit-content; margin:2px 0 0; line-height:1.6; padding:3px 8px; font-family:inherit; white-space:nowrap;}
   .comment-btn{
     font-size:12px; color:var(--accent); margin-top:4px; cursor:pointer; width:fit-content;
   }
@@ -429,6 +431,7 @@
 // (n'affecte jamais la couleur ni l'apparence de l'événement dans Google Agenda)
 const STATUS_KEY = 'atelier_status';   // 'recu' | 'cours' | 'paused' | 'done' | absent
 const COMMENT_KEY = 'atelier_comment';
+const MODIFIED_AT_KEY = 'atelier_modified_at'; // date/heure ISO de la dernière modification via « Modifier le RDV »
 const COMMENT_AT_KEY = 'atelier_comment_at'; // date/heure ISO de la dernière modification du commentaire
 const PERF_BEFORE_KEY = 'atelier_perf_before';
 const PERF_AFTER_KEY = 'atelier_perf_after';
@@ -764,6 +767,7 @@ function mapEvent(ev){
     received: priv[STATUS_KEY] === 'recu', // voiture réceptionnée à l'atelier (avant "En cours")
     comment: priv[COMMENT_KEY] || '',
     commentAt: priv[COMMENT_AT_KEY] || '',
+    modifiedAt: priv[MODIFIED_AT_KEY] || '',
     perfBefore: priv[PERF_BEFORE_KEY] || '',
     perfAfter: priv[PERF_AFTER_KEY] || '',
     perf060Before: priv[PERF060_BEFORE_KEY] || '',
@@ -1633,7 +1637,7 @@ function extractMarkersSuffix(raw){
 // courtoisie et sa conversation liée restent inchangés.
 async function updateEventDetails(id, {summary, date, startTime, endTime, isMultiDay, endDate}){
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${id}`;
-  const body = { summary };
+  const body = { summary, extendedProperties: { private: { [MODIFIED_AT_KEY]: new Date().toISOString() } } };
   if(isMultiDay){
     const endExclusive = new Date(endDate + 'T00:00:00');
     endExclusive.setDate(endExclusive.getDate() + 1);
@@ -2635,6 +2639,7 @@ function renderList(){
               <div class="time">${fmtRange(ev)}<span>${statusLabel}</span>${tarifCornerHtml}</div>
               <div class="body">
                 ${body}
+                ${rdvDatesHtml(ev)}
                 ${paymentBadgeHtml}
                 ${commentHtml}
                 ${perfSummaryHtml}
@@ -3212,11 +3217,27 @@ async function runSearch(query){
 
 // Commentaire + petite horloge 🕒 : la date/heure de dernière modification (heure de Paris) ne
 // s'affiche qu'au toucher/clic sur l'horloge. Pas d'horloge pour les anciens commentaires sans date.
+function fmtDateHeureParis(iso){
+  const d = iso ? new Date(iso) : null;
+  if(!d || isNaN(d)) return '';
+  return d.toLocaleString('fr-FR', { timeZone:'Europe/Paris', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(' ', ' à ');
+}
+
+// Petite horloge 🕒 sur la carte RDV : au toucher, affiche la date/heure de prise du rendez-vous
+// (date de création Google Agenda, donc aussi pour les RDV pris par l'assistant du site) et celle de
+// la dernière modification faite avec « Modifier le RDV ».
+function rdvDatesHtml(ev){
+  const pris = fmtDateHeureParis(ev.created);
+  const modif = fmtDateHeureParis(ev.modifiedAt);
+  if(!pris && !modif) return '';
+  const lignes = [pris ? `Pris le ${escapeHtml(pris)}` : '', modif ? `Modifié le ${escapeHtml(modif)}` : ''].filter(Boolean).join('<br>');
+  return `<details class="comment-at rdv-at" onclick="event.stopPropagation()"><summary title="Prise et modification du RDV">🕒</summary><span>${lignes}</span></details>`;
+}
+
 function commentBubbleHtml(comment, at){
   let atHtml = '';
-  const d = at ? new Date(at) : null;
-  if(d && !isNaN(d)){
-    const txt = d.toLocaleString('fr-FR', { timeZone:'Europe/Paris', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(' ', ' à ');
+  const txt = fmtDateHeureParis(at);
+  if(txt){
     atHtml = `<details class="comment-at" onclick="event.stopPropagation()"><summary title="Date de modification">🕒</summary><span>Modifié le ${escapeHtml(txt)}</span></details>`;
   }
   return `<div class="comment-text">"${escapeHtml(comment)}"${atHtml}</div>`;
