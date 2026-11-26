@@ -207,6 +207,11 @@
     font-size:13px; color:var(--text-dim); font-style:italic; margin-top:2px;
     padding:6px 10px; background:var(--panel-2); border-radius:8px; border-left:2px solid var(--accent);
   }
+  .comment-at{display:inline; margin-left:6px; font-style:normal;}
+  .comment-at summary{display:inline; list-style:none; cursor:pointer; font-size:12px; opacity:.6;}
+  .comment-at summary::-webkit-details-marker{display:none;}
+  .comment-at[open] summary{opacity:1;}
+  .comment-at span{display:inline-block; margin-left:4px; padding:1px 7px; border-radius:10px; background:var(--panel); color:var(--text); font-size:11px; font-family:var(--mono);}
   .comment-btn{
     font-size:12px; color:var(--accent); margin-top:4px; cursor:pointer; width:fit-content;
   }
@@ -424,6 +429,7 @@
 // (n'affecte jamais la couleur ni l'apparence de l'événement dans Google Agenda)
 const STATUS_KEY = 'atelier_status';   // 'recu' | 'cours' | 'paused' | 'done' | absent
 const COMMENT_KEY = 'atelier_comment';
+const COMMENT_AT_KEY = 'atelier_comment_at'; // date/heure ISO de la dernière modification du commentaire
 const PERF_BEFORE_KEY = 'atelier_perf_before';
 const PERF_AFTER_KEY = 'atelier_perf_after';
 const PERF060_BEFORE_KEY = 'atelier_perf060_before';
@@ -757,6 +763,7 @@ function mapEvent(ev){
     inProgress: priv[STATUS_KEY] === 'cours',
     received: priv[STATUS_KEY] === 'recu', // voiture réceptionnée à l'atelier (avant "En cours")
     comment: priv[COMMENT_KEY] || '',
+    commentAt: priv[COMMENT_AT_KEY] || '',
     perfBefore: priv[PERF_BEFORE_KEY] || '',
     perfAfter: priv[PERF_AFTER_KEY] || '',
     perf060Before: priv[PERF060_BEFORE_KEY] || '',
@@ -794,7 +801,7 @@ function dedupeRemoteTasks(tasks){
     if(!existant){ parId.set(t.id, t); continue; }
     const fusion = { ...existant };
     if((priorite[t.status] || 0) > (priorite[existant.status] || 0)) fusion.status = t.status;
-    if(!fusion.comment && t.comment) fusion.comment = t.comment;
+    if(!fusion.comment && t.comment){ fusion.comment = t.comment; fusion.commentAt = t.commentAt || ''; }
     parId.set(t.id, fusion);
   }
   return [...parId.values()];
@@ -949,7 +956,8 @@ function setRemoteStatus(id, status){
 function setRemoteComment(id, comment){
   const matches = remoteTasks.filter(x => x.id === id);
   if(matches.length === 0) return;
-  matches.forEach(t => t.comment = comment);
+  const at = comment ? new Date().toISOString() : '';
+  matches.forEach(t => { t.comment = comment; t.commentAt = at; });
   saveRemoteTasksToServer();
   renderList();
 }
@@ -991,7 +999,7 @@ function renderRemoteTasksHtml(){
         ⬇ ${escapeHtml(a.filename)}
       </div>
     `).join('');
-    const commentHtml = t.comment ? `<div class="comment-text">"${escapeHtml(t.comment)}"</div>` : '';
+    const commentHtml = t.comment ? commentBubbleHtml(t.comment, t.commentAt) : '';
     return `
       <div class="card ${t.status === 'paused' ? 'paused' : ''} ${t.status === 'cours' ? 'inprogress' : ''}">
         <div class="card-top">
@@ -1174,7 +1182,7 @@ function setStatus(id, status){
 }
 
 function setComment(id, comment){
-  patchPrivateProps(id, { [COMMENT_KEY]: comment });
+  patchPrivateProps(id, { [COMMENT_KEY]: comment, [COMMENT_AT_KEY]: comment ? new Date().toISOString() : '' });
 }
 
 // Retire un marqueur " <emoji> ...contenu..." du titre, sans toucher à l'AUTRE marqueur (courtoisie
@@ -1491,6 +1499,7 @@ async function createCalendarEvent({nom, voiture, presta, numero, commentaire, c
   if(commentaire || courtesy || tarifFinal){
     await patchPrivateProps(created.id, {
       [COMMENT_KEY]: commentaire || '',
+      [COMMENT_AT_KEY]: commentaire ? new Date().toISOString() : '',
       [COURTESY_CAR_KEY]: courtesy || '',
       [TARIF_BASE_KEY]: tarifBase || '',
       [TARIF_REDUCTION_KEY]: tarifReductionPct || '',
@@ -2575,7 +2584,7 @@ function renderList(){
              ${spansMultiple ? `<div class="multiday-tag">Véhicule gardé plusieurs jours</div>` : ''}`;
         const statusLabel = ev.done ? 'FAIT' : (ev.paused ? 'EN PAUSE' : (ev.inProgress ? 'EN COURS' : (ev.received ? 'RÉCEPTIONNÉE' : 'PRÉVU')));
         const commentHtml = ev.comment
-          ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>`
+          ? commentBubbleHtml(ev.comment, ev.commentAt)
           : '';
         const hasPerf = ev.perfBefore || ev.perfAfter || ev.perf060Before || ev.perf060After || ev.hpBefore || ev.hpAfter || ev.torqueBefore || ev.torqueAfter;
         const perfLines = [];
@@ -3138,7 +3147,7 @@ async function runSearch(query){
         <div class="sr-body">
           <div class="sr-title">📁 ${escapeHtml(t.subject || '(sans objet)')}</div>
           <div class="sr-phone">${escapeHtml(t.from)}</div>
-          ${t.comment ? `<div class="comment-text">"${escapeHtml(t.comment)}"</div>` : ''}
+          ${t.comment ? commentBubbleHtml(t.comment, t.commentAt) : ''}
         </div>
         <div class="sr-status">${t.status === 'done' ? 'Fait' : (t.status === 'paused' ? 'En pause' : (t.status === 'cours' ? 'En cours' : 'À faire'))}</div>
       </div>
@@ -3170,7 +3179,7 @@ async function runSearch(query){
             <div class="sr-body">
               <div class="sr-title">${escapeHtml(label)}</div>
               ${parts?.phone ? `<div class="sr-phone">${escapeHtml(parts.phone)}</div>` : ''}
-              ${ev.comment ? `<div class="comment-text">"${escapeHtml(ev.comment)}"</div>` : ''}
+              ${ev.comment ? commentBubbleHtml(ev.comment, ev.commentAt) : ''}
             </div>
             <div class="sr-status">${statusLabel}</div>
           </div>
@@ -3199,6 +3208,18 @@ async function runSearch(query){
       openEditEventModal(match.id, match.ev);
     };
   });
+}
+
+// Commentaire + petite horloge 🕒 : la date/heure de dernière modification (heure de Paris) ne
+// s'affiche qu'au toucher/clic sur l'horloge. Pas d'horloge pour les anciens commentaires sans date.
+function commentBubbleHtml(comment, at){
+  let atHtml = '';
+  const d = at ? new Date(at) : null;
+  if(d && !isNaN(d)){
+    const txt = d.toLocaleString('fr-FR', { timeZone:'Europe/Paris', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).replace(' ', ' à ');
+    atHtml = `<details class="comment-at" onclick="event.stopPropagation()"><summary title="Date de modification">🕒</summary><span>Modifié le ${escapeHtml(txt)}</span></details>`;
+  }
+  return `<div class="comment-text">"${escapeHtml(comment)}"${atHtml}</div>`;
 }
 
 function escapeHtml(s){
